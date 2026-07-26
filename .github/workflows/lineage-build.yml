@@ -1,0 +1,177 @@
+name: LineageOS 15.1 (CAM-TL00 / hi6210sft)
+
+# Builds LineageOS 15.1 for the generic hi6210sft product (`alice`), adapted for
+# Huawei CAM-TL00 (Honor 5A). See README.md for the hardware audit behind this.
+#
+# The free runner has a hard 6h job ceiling and a full 15.1 build on 4 cores does
+# not fit in one pass. The build is therefore RESUMABLE: it stops itself before
+# the ceiling, saves ccache, and continues on the next run. Expect 2-3 runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_timeout:
+        description: 'Internal build limit (must leave room under the 6h job cap)'
+        required: true
+        default: '290m'
+      lunch_target:
+        description: 'lunch target'
+        required: true
+        default: 'lineage_alice-userdebug'
+      ccache_size:
+        description: 'ccache size (repo cache budget is 10GB total)'
+        required: true
+        default: '6G'
+      clean_ccache:
+        description: 'Start from a cold ccache'
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    permissions:
+      contents: write
+
+    steps:
+      # Must run before anything fills the disk. Combines the free space on /
+      # and /mnt into one LVM volume -- roughly 85GB, against a need of about
+      # 25GB source + 40GB out + 6GB ccache.
+      - name: Maximise build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 4096
+          build-mount-path: '/work'
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Take ownership of /work
+        run: sudo chown -R "$(id -u):$(id -g)" /work
+
+      - name: Check out builder scripts
+        uses: actions/checkout@v4
+
+      - name: Show starting disk
+        run: df -h / /work
+
+      - name: Install repo
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > "$HOME/bin/repo"
+          chmod a+x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      # Restored before the build, saved after it even on timeout -- this is what
+      # carries progress between runs.
+      - name: Restore ccache
+        if: ${{ !inputs.clean_ccache }}
+        uses: actions/cache/restore@v4
+        with:
+          path: /work/ccache
+          key: ccache-alice-${{ github.run_id }}
+          restore-keys: |
+            ccache-alice-
+
+      - name: Sync source and apply CAM-TL00 patches
+        env:
+          WORKDIR: /work/workspace
+          GIT_NAME: ${{ github.actor }}
+          GIT_EMAIL: ${{ github.actor }}@users.noreply.github.com
+        run: bash scripts/sync-source.sh
+
+      - name: Disk after sync
+        run: df -h / /work
+
+      - name: Build
+        id: build
+        run: |
+          set +e
+          docker run --rm \
+            -v /work:/work \
+            -v "${{ github.workspace }}:/repo" \
+            -e WORKDIR=/work/workspace \
+            -e CCACHE_DIR=/work/ccache \
+            -e CCACHE_SIZE='${{ inputs.ccache_size }}' \
+            -e BUILD_TIMEOUT='${{ inputs.build_timeout }}' \
+            -e LUNCH_TARGET='${{ inputs.lunch_target }}' \
+            -e JOBS="$(nproc)" \
+            ubuntu:18.04 \
+            bash /repo/scripts/build-in-container.sh
+          rc=$?
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Restore ownership
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" /work || true
+
+      # always(), so a run that ran out of time still banks its compiled objects.
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /work/ccache
+          key: ccache-alice-${{ github.run_id }}
+
+      - name: Disk after build
+        if: always()
+        run: df -h / /work
+
+      - name: Stop here if the build needs another run
+        if: steps.build.outputs.rc == '75'
+        run: |
+          {
+            echo "### Build incomplete - re-run to continue"
+            echo ""
+            echo "Hit the internal \`${{ inputs.build_timeout }}\` limit before the ROM finished."
+            echo "ccache was saved. Re-run this workflow; a warm cache usually"
+            echo "finishes on the second or third attempt."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on a real build error
+        if: steps.build.outputs.rc != '0' && steps.build.outputs.rc != '75'
+        run: |
+          echo "Build failed with exit code ${{ steps.build.outputs.rc }}" >&2
+          exit 1
+
+      # From here on the ROM exists. Gate it before it can reach the phone.
+      - name: Verify output against CAM-TL00 geometry
+        if: steps.build.outputs.rc == '0'
+        run: |
+          ZIP=$(ls /work/workspace/out/target/product/alice/lineage-15.1-*.zip | head -1)
+          python3 scripts/verify-rom.py \
+            --product-out /work/workspace/out/target/product/alice \
+            --zip "${ZIP}"
+
+      - name: Upload ROM
+        if: steps.build.outputs.rc == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineage-15.1-cam-tl00
+          path: |
+            /work/workspace/out/target/product/alice/lineage-15.1-*.zip
+            /work/workspace/out/target/product/alice/boot.img
+            /work/workspace/out/target/product/alice/recovery.img
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summary
+        if: steps.build.outputs.rc == '0'
+        run: |
+          {
+            echo "### LineageOS 15.1 for CAM-TL00 built"
+            echo ""
+            echo '```'
+            ls -lh /work/workspace/out/target/product/alice/lineage-15.1-*.zip \
+                   /work/workspace/out/target/product/alice/boot.img
+            echo '```'
+            echo ""
+            echo "Flash with the **alice** TWRP (it reports \`ro.product.device=hi6210sft\`,"
+            echo "which is what satisfies the OTA assert). Back up boot and recovery first,"
+            echo "and use \`Wipe -> Format Data\` when coming from Android 6 EMUI."
+          } >> "$GITHUB_STEP_SUMMARY"

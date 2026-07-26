@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LineageOS 15.1 for Huawei hi6210sft (Kirin 620).
+
+  Target device is CAM-TL00 (Honor 5A / 荣耀畅玩5A), but the build stays on the
+  generic `alice` (P8 Lite) product on purpose: CAM-TL00 and ALE-L21 share the
+  SoC, the boot load addresses, and all 15 hardcoded mmcblk0pNN partition
+  numbers used by rootdir/fstab.hi6210sft. See ../README.md for the full audit.
+
+  All four repos MUST be pinned to lineage-15.1. The copy of the kernel under
+  ../references/ is on cm-14.1 and is NOT usable for an 8.1 build.
+-->
+<manifest>
+  <project name="DarkJoker360/android_kernel_huawei_alice" path="kernel/huawei/alice" remote="github" revision="lineage-15.1"/>
+  <project name="DarkJoker360/android_device_huawei_alice" path="device/huawei/alice" remote="github" revision="lineage-15.1"/>
+  <project name="DarkJoker360/android_vendor_huawei_alice" path="vendor/huawei/alice" remote="github" revision="lineage-15.1"/>
+  <project name="DarkJoker360/alice_patcher"               path="alice_patcher"       remote="github" revision="lineage-15.1"/>
+</manifest>
