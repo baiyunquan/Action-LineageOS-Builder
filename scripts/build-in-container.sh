@@ -74,6 +74,13 @@ fi
 export LC_ALL=C
 export ALLOW_MISSING_DEPENDENCIES=true
 
+# Build Java with javac/d8 instead of Jack. Jack talks to a background server
+# over a local TLS socket whose certificates are generated on first run; inside a
+# container that fails with "SSL error when connecting to the Jack server" and
+# takes the whole build down at setup-jack-server. Jack was already deprecated in
+# Android 8.0, and 8.1 builds fine on the javac path.
+export ANDROID_COMPILE_WITH_JACK=false
+
 echo "==> envsetup + lunch ${LUNCH_TARGET}"
 # -u must stay OFF from here on: envsetup.sh, lunch and mka all read unset
 # variables (TOP, version, ...). Re-enabling it after the source aborts lunch
