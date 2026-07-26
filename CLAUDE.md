@@ -32,15 +32,26 @@ partition dumps. See `../CLAUDE.md` for the device background.
 
 ## Files
 
+There are two build paths. Sync and patching are **shared**; only the compile
+step differs.
+
 | File | Runs where | Purpose |
 |---|---|---|
-| `.github/workflows/lineage-build.yml` | — | `workflow_dispatch` only |
-| `scripts/sync-source.sh` | host | repo init/sync, then calls both patch scripts |
-| `scripts/apply-device-patches.sh` | host | the 3 BoardConfig.mk edits |
-| `scripts/apply-alice-patcher.sh` | host | idempotent replacement for upstream `patches.sh` |
-| `scripts/build-in-container.sh` | ubuntu:18.04 | deps, envsetup, lunch, `mka bacon` |
-| `scripts/verify-rom.py` | host | output gate; run before anything reaches the phone |
+| `.github/workflows/lineage-build.yml` | — | CI, `workflow_dispatch` only |
+| `scripts/build-local.sh` | host | local driver: preflight, sync, build, verify |
+| `docker/Dockerfile` | — | local builder image; deps installed once |
+| `scripts/build-inner.sh` | container/host | local compile step, no timeout logic |
+| `scripts/build-in-container.sh` | ubuntu:18.04 | CI compile step, with timeout + resume |
+| `scripts/sync-source.sh` | host | shared: repo init/sync, then both patch scripts |
+| `scripts/apply-device-patches.sh` | host | shared: the 3 BoardConfig.mk edits |
+| `scripts/apply-alice-patcher.sh` | host | shared: idempotent replacement for `patches.sh` |
+| `scripts/verify-rom.py` | host | shared: output gate, run before anything reaches the phone |
 | `local_manifests/alice.xml` | — | 4 repos, all pinned `lineage-15.1` |
+
+Prefer the **local** path when iterating on the device tree: CI re-runs replay
+all 92680 targets, whereas locally `out/` persists and a one-line change
+rebuilds in minutes. Keep the timeout/resume logic out of `build-inner.sh` — a
+local build that stops is a genuine error, not "time ran out, re-run me".
 
 Build product is `lineage_alice-userdebug`; output lands in
 `out/target/product/alice/` (PRODUCT_DEVICE is `alice`, not `cam`).
@@ -59,6 +70,32 @@ WITH_DEXPREOPT := false                              # time + system-image space
 It also **asserts** that kernel base/pagesize and the system/boot/recovery/cache
 sizes still match the phone. If upstream ever changes one, the script fails
 rather than producing an unflashable image. Do not weaken those assertions.
+
+## Four build failures already paid for — do not reintroduce them
+
+Each of these cost a CI run. They are fixed in both build paths; if you touch
+the environment setup, keep them.
+
+1. **Do not rewrite bionic's apt sources to `old-releases.ubuntu.com`.** 18.04 is
+   still under ESM, so bionic is on `archive.ubuntu.com`. Verified directly:
+   `old-releases.../dists/bionic/Release` → 404, `archive.../dists/bionic/Release`
+   → 200. The rewrite made *every* package unresolvable.
+2. **Never restore `set -u` after sourcing `envsetup.sh`.** `lunch` dies with
+   `TOP: unbound variable`. `-u` stays off for the rest of the script.
+3. **`mka` is a shell function, not a binary.** Anything that execs it
+   (`timeout`, `docker run`, `xargs`) fails with exit 127. Use
+   `make -j N bacon`; `bacon` is a real target in `vendor/lineage/build/tasks`
+   and `lunch` exports everything make needs.
+4. **Jack cannot start in a container** — it uses a local TLS socket with certs
+   generated on first run, and fails at `setup-jack-server` with "SSL error when
+   connecting to the Jack server". `ANDROID_COMPILE_WITH_JACK=false` uses
+   javac/d8, which is correct for 8.1 anyway (Jack was deprecated in 8.0).
+
+Also unresolved: CI run 4 compiled for ~2h, then `Save ccache` failed and
+skipped verification and upload, so **it was never established whether that run
+produced a ROM**. The likely cause is the ccache exceeding the 10GB per-repo
+cache budget. If you pick this up, check that first, and give the ccache save
+step an `if: always()`-style guard so it cannot skip the verify/upload steps.
 
 ## Things that will bite you
 

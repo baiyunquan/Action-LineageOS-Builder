@@ -1,11 +1,30 @@
 # LineageOS 15.1 for Huawei CAM-TL00 (Honor 5A / 荣耀畅玩5A)
 
 用通用 `hi6210sft` (`alice`) 设备树为 CAM-TL00 构建 LineageOS 15.1（Android 8.1），
-经 GitHub Actions 编译。
+支持 GitHub Actions 与本地两条编译路线。
 
 设备当前停留在 Android 6.0 EMUI（`HONOR/CAM-TL00/HWCAM-H:6.0/.../C01B243`）。
 DanteFX 编译的通用 hi6210sft **LineageOS 14.1 已实测可用，WiFi、通话/移动数据、
 相机三项均正常** —— 这是本方案的可行性基础。
+
+---
+
+## 当前状态
+
+**尚未产出可刷机的 ROM。** CI 上跑了 4 轮，逐个修掉了真实的构建错误：
+
+| Run | 结果 | 修复 |
+|---|---|---|
+| 1 | apt 全部包找不到 | `sed` 把源改到 old-releases 是**写反的** —— bionic 仍在 `archive.ubuntu.com`（实测 old-releases 对 `dists/bionic/Release` 返回 404）。同时补上被忽略的 apt 退出码检查 |
+| 2 | `exit 127` | `timeout ... mka` —— `mka` 是 `envsetup.sh` 定义的 shell 函数，无法被 exec。改用 `make -j N bacon` |
+| 3 | 编译到 5% (4878/92680) 后失败 | Jack server 在容器内 SSL 握手失败。改用 javac（`ANDROID_COMPILE_WITH_JACK=false`） |
+| 4 | 连续编译约 2 小时后，`Save ccache` 步骤失败 | **未确认**：该步失败导致后续校验/上传被跳过，编译本身是否产出 zip 未能查证 |
+
+已确认可用的部分：repo 同步、设备树补丁、`alice_patcher` 补丁、`lunch`
+（`TARGET_PRODUCT=lineage_alice`）、以及约 2 小时的实际编译。
+
+未确认的部分：Run 4 是否真的编译完成、`Save ccache` 为何失败（很可能是 ccache
+超过仓库 10GB 缓存额度）、以及后续的产物校验与上传路径。
 
 ---
 
@@ -73,10 +92,30 @@ WITH_DEXPREOPT := false                              # 省时间，也省 system
 
 ## 编译
 
+有两条路线，同步与打补丁的脚本完全共用，产出的源码树一致：
+
+| | GitHub Actions | 本地 x86_64 |
+|---|---|---|
+| 入口 | Actions → Run workflow | [`./scripts/build-local.sh`](scripts/build-local.sh) |
+| 单次时长 | **6 小时硬上限** | 无限制 |
+| `out/` 保留 | **否**（runner 用完即毁） | 是 |
+| 重跑语义 | ccache 预热后从头再来 | **真正的增量编译** |
+| 适合 | 只要一个产物 | **反复调设备树** |
+
+本地路线见 **[LOCAL_BUILD.md](LOCAL_BUILD.md)**。若要迭代设备树，强烈建议用本地 ——
+CI 上每次重跑都要把 92680 个目标重新走一遍，本地改一行重编通常只要几分钟。
+
+### GitHub Actions
+
 在 GitHub 上新建仓库，把本目录内容推上去，然后手动触发
 **Actions → LineageOS 15.1 (CAM-TL00 / hi6210sft) → Run workflow**。
 
 ### 关于 6 小时上限（重要）
+
+> ⚠ 补充说明：GitHub runner 是**临时的**，`out/` 与源码树在两次运行之间
+> **不会保留**，只有 ccache 经 `actions/cache` 持久化。所以「续跑」实际是
+> 「ccache 预热后重新开始」，而不是断点续编 —— 每次运行只是让更多目标文件
+> 进入缓存。若始终收敛不了，请改用本地路线。
 
 免费 runner 单任务上限 6 小时，4 核全量编译 LineageOS 15.1 通常 5-10 小时，
 **第一次几乎一定跑不完**。因此本工作流设计成**可续跑**：
@@ -171,13 +210,17 @@ fastboot flash recovery partitions/recovery_raw.img
 
 ```
 lineage_build/
-├── .github/workflows/lineage-build.yml   # 可续跑的编译工作流
+├── .github/workflows/lineage-build.yml   # CI：可续跑的编译工作流
+├── docker/Dockerfile                     # 本地：ubuntu:18.04 构建镜像（依赖只装一次）
+├── LOCAL_BUILD.md                        # 本地编译方案与说明
 ├── local_manifests/alice.xml             # 四个仓库，全部锁定 lineage-15.1
 ├── scripts/
-│   ├── sync-source.sh                    # 宿主机：repo init/sync + 打补丁
-│   ├── apply-device-patches.sh           # 设备树三处改动（幂等）
-│   ├── apply-alice-patcher.sh            # alice_patcher 的幂等替代（见下）
-│   ├── build-in-container.sh             # bionic 容器内编译，带超时续跑
+│   ├── build-local.sh                    # 本地：总驱动（预检→同步→编译→门禁）
+│   ├── build-inner.sh                    # 本地：纯编译步骤，无超时续跑逻辑
+│   ├── sync-source.sh                    # 共用：repo init/sync + 打补丁
+│   ├── apply-device-patches.sh           # 共用：设备树三处改动（幂等）
+│   ├── apply-alice-patcher.sh            # 共用：alice_patcher 的幂等替代（见下）
+│   ├── build-in-container.sh             # CI：bionic 容器内编译，带超时续跑
 │   └── verify-rom.py                     # 产物门禁
 └── README.md
 ```
