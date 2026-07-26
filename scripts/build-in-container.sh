@@ -24,13 +24,19 @@ BUILD_TIMEOUT="${BUILD_TIMEOUT:-290m}"
 CCACHE_SIZE="${CCACHE_SIZE:-8G}"
 
 echo "==> Installing build dependencies (bionic)"
-# 18.04 is EOL; its packages only live on old-releases now.
-sed -i -e 's|archive.ubuntu.com|old-releases.ubuntu.com|g' \
-       -e 's|security.ubuntu.com|old-releases.ubuntu.com|g' \
-       -e 's|ports.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list
-
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
+
+# 18.04 is still under ESM, so bionic packages remain on archive.ubuntu.com.
+# They are NOT on old-releases -- that mirror 404s for dists/bionic/Release, and
+# rewriting the sources to point at it breaks an otherwise working config.
+# Only fall back if the default mirror ever stops serving bionic.
+if ! apt-get update -qq; then
+    echo "   default mirror failed, retrying against old-releases"
+    sed -i -e 's|archive.ubuntu.com|old-releases.ubuntu.com|g' \
+           -e 's|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list
+    apt-get update -qq || { echo "!! apt-get update failed" >&2; exit 1; }
+fi
+
 apt-get install -y -qq --no-install-recommends \
     openjdk-8-jdk \
     bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
@@ -38,11 +44,18 @@ apt-get install -y -qq --no-install-recommends \
     liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \
     libwxgtk3.0-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool \
     squashfs-tools xsltproc zip zlib1g-dev unzip python python-minimal \
-    > /dev/null
+    > /dev/null || { echo "!! dependency install failed" >&2; exit 1; }
 
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 export PATH="${JAVA_HOME}/bin:${PATH}"
-echo "   java: $(java -version 2>&1 | head -1)"
+
+# Fail here rather than 40 minutes later inside the build. A missing python2 in
+# particular shows up as a confusing "roomservice.py: No such file or directory"
+# (the shebang interpreter is what is actually missing).
+for tool in java python curl git; do
+    command -v "${tool}" >/dev/null || { echo "!! ${tool} not installed" >&2; exit 1; }
+done
+echo "   java:   $(java -version 2>&1 | head -1)"
 echo "   python: $(python --version 2>&1)"
 
 cd "${WORKDIR}"
@@ -62,10 +75,20 @@ export LC_ALL=C
 export ALLOW_MISSING_DEPENDENCIES=true
 
 echo "==> envsetup + lunch ${LUNCH_TARGET}"
+# -u must stay OFF from here on: envsetup.sh, lunch and mka all read unset
+# variables (TOP, version, ...). Re-enabling it after the source aborts lunch
+# with "TOP: unbound variable".
 set +u
 source build/envsetup.sh
-set -u
-lunch "${LUNCH_TARGET}" || { echo "!! lunch failed" >&2; exit 1; }
+lunch "${LUNCH_TARGET}"
+
+# lunch prints its errors but does not reliably exit non-zero, so check that it
+# actually selected the product instead of trusting its status.
+if [ "${TARGET_PRODUCT:-}" != "lineage_alice" ]; then
+    echo "!! lunch did not select lineage_alice (TARGET_PRODUCT='${TARGET_PRODUCT:-unset}')" >&2
+    exit 1
+fi
+echo "   TARGET_PRODUCT=${TARGET_PRODUCT} TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT:-?}"
 
 echo "==> Building (limit ${BUILD_TIMEOUT}, -j${JOBS})"
 # `timeout` rather than letting Actions kill the job: a hard kill would skip the
