@@ -93,7 +93,13 @@ echo "   TARGET_PRODUCT=${TARGET_PRODUCT} TARGET_BUILD_VARIANT=${TARGET_BUILD_VA
 echo "==> Building (limit ${BUILD_TIMEOUT}, -j${JOBS})"
 # `timeout` rather than letting Actions kill the job: a hard kill would skip the
 # ccache save step and throw away every bit of progress this run made.
-timeout "${BUILD_TIMEOUT}" mka bacon -j"${JOBS}"
+#
+# Invoke make directly rather than mka: mka is a shell function from
+# envsetup.sh, and timeout can only exec a real binary ("failed to run command
+# 'mka': No such file or directory"). lunch has already exported everything make
+# needs, WORKDIR is the top of the tree, and `bacon` is a genuine make target
+# from vendor/lineage/build/tasks -- so this is equivalent.
+timeout "${BUILD_TIMEOUT}" make -j"${JOBS}" bacon
 rc=$?
 
 if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
