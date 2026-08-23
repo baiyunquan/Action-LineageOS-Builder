@@ -97,13 +97,14 @@ fi
 
 echo "==> Creating CCI2 Pod ${POD_NAME} in ${CCI_REGION}/${CCI_NAMESPACE}"
 hcloud CCI createNamespacedPod --cli-region="${CCI_REGION}" \
-    --namespace="${CCI_NAMESPACE}" --cli-jsonInput="${input_file}" >"${create_output}"
+    --namespace="${CCI_NAMESPACE}" --cli-jsonInput="${input_file}" >"${create_output}" 2>&1
 python3 - "${create_output}" <<'PY'
 import json, sys
 raw = open(sys.argv[1], encoding="utf-8").read()
 start = raw.find("{")
 if start < 0:
-    raise SystemExit("KooCLI returned no JSON response")
+    print("KooCLI returned no JSON response:", raw[:2000], file=sys.stderr)
+    raise SystemExit(1)
 obj = json.loads(raw[start:])
 if obj.get("status") == "Failure":
     print(obj.get("message", "CCI create failed"), file=sys.stderr)
