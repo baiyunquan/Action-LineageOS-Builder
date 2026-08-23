@@ -73,8 +73,10 @@ body = {
         "containers": [{
             "name": "builder",
             "image": os.environ["CCI_IMAGE"],
-            "command": ["bash", "-lc"],
-            "args": [entrypoint],
+            # CCI2 did not start a container when bash -lc was split between
+            # command and args. Keep the complete shell invocation in command
+            # so the runtime receives an actual command line.
+            "command": ["bash", "-c", "set -o pipefail; " + entrypoint],
             "env": [{"name": key, "value": os.environ[key]} for key in env_names],
         }],
     },
