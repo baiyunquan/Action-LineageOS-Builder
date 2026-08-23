@@ -100,7 +100,14 @@ hcloud CCI createNamespacedPod --cli-region="${CCI_REGION}" \
     --namespace="${CCI_NAMESPACE}" --cli-jsonInput="${input_file}" >"${create_output}"
 python3 - "${create_output}" <<'PY'
 import json, sys
-obj = json.load(open(sys.argv[1], encoding="utf-8"))
+raw = open(sys.argv[1], encoding="utf-8").read()
+start = raw.find("{")
+if start < 0:
+    raise SystemExit("KooCLI returned no JSON response")
+obj = json.loads(raw[start:])
+if obj.get("status") == "Failure":
+    print(obj.get("message", "CCI create failed"), file=sys.stderr)
+    raise SystemExit(1)
 print("pod uid:", obj.get("metadata", {}).get("uid", "unknown"))
 PY
 
