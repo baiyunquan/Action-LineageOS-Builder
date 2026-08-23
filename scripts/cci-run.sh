@@ -26,7 +26,7 @@ POD_NAME="${POD_NAME,,}"
 command -v hcloud >/dev/null || { echo "!! hcloud/KooCLI is required" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "!! python3 is required" >&2; exit 1; }
 
-input_file="$(mktemp)"
+input_file="$(mktemp --suffix=.json)"
 create_output="$(mktemp)"
 trap 'rm -f "${input_file}" "${create_output}"' EXIT
 
