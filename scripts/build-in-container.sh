@@ -43,7 +43,7 @@ apt-get install -y -qq --no-install-recommends \
     gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev \
     liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \
     libwxgtk3.0-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool \
-    squashfs-tools xsltproc zip zlib1g-dev unzip python python-minimal \
+    squashfs-tools xsltproc zip zlib1g-dev unzip python python-minimal git-lfs \
     > /dev/null || { echo "!! dependency install failed" >&2; exit 1; }
 
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
@@ -52,13 +52,36 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 # Fail here rather than 40 minutes later inside the build. A missing python2 in
 # particular shows up as a confusing "roomservice.py: No such file or directory"
 # (the shebang interpreter is what is actually missing).
-for tool in java python curl git; do
+for tool in java python curl git git-lfs; do
     command -v "${tool}" >/dev/null || { echo "!! ${tool} not installed" >&2; exit 1; }
 done
 echo "   java:   $(java -version 2>&1 | head -1)"
 echo "   python: $(python --version 2>&1)"
 
 cd "${WORKDIR}"
+
+# Some LineageOS 15.1 projects keep large prebuilts in Git LFS.  A repo sync
+# can leave the LFS pointer in the worktree when the host has no LFS filter;
+# that is exactly how the 134-byte chromium-webview pointer reached the old
+# GitHub run.  Hydrate the affected project inside the build container, then
+# fail before compilation if any pointer remains.
+echo "==> Hydrating Git LFS prebuilts"
+git lfs install --system >/dev/null 2>&1 || true
+if [ -d external/chromium-webview ]; then
+    git -C external/chromium-webview lfs install --local >/dev/null 2>&1 || true
+    git -C external/chromium-webview lfs pull
+fi
+pointer_count=0
+while IFS= read -r -d '' candidate; do
+    if head -n1 "${candidate}" | grep -qx 'version https://git-lfs.github.com/spec/v1'; then
+        echo "!! unresolved Git LFS pointer: ${candidate}" >&2
+        pointer_count=$((pointer_count + 1))
+    fi
+done < <(find . -type f -size -1k -print0)
+if [ "${pointer_count}" -ne 0 ]; then
+    echo "!! ${pointer_count} unresolved Git LFS pointer(s); refusing to build" >&2
+    exit 1
+fi
 
 # ccache is what makes a resumed run finish inside the time limit; a warm cache
 # typically takes the second or third run from ~6h down to well under two.

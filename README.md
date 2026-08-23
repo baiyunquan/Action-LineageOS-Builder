@@ -1,7 +1,7 @@
 # LineageOS 15.1 for Huawei CAM-TL00 (Honor 5A / 荣耀畅玩5A)
 
 用通用 `hi6210sft` (`alice`) 设备树为 CAM-TL00 构建 LineageOS 15.1（Android 8.1），
-支持 GitHub Actions 与本地两条编译路线。
+支持 GitHub Actions、本地 x86_64，以及华为云 CCI2 三条编译路线。
 
 设备当前停留在 Android 6.0 EMUI（`HONOR/CAM-TL00/HWCAM-H:6.0/.../C01B243`）。
 DanteFX 编译的通用 hi6210sft **LineageOS 14.1 已实测可用，WiFi、通话/移动数据、
@@ -127,6 +127,18 @@ CI 上每次重跑都要把 92680 个目标重新走一遍，本地改一行重�
 4. 第 2～3 次运行 ccache 命中率高，通常能在时限内完成。
 
 **用法：触发后如果 Summary 显示 "Build incomplete"，直接再点一次 Run workflow。**
+
+### Huawei Cloud CCI2
+
+云端路线保留 GitHub 作为源码入口，由本地 KooCLI 创建一次性的 CCI2 Pod，
+Pod 内执行同一套 `sync-source.sh` 与 `build-in-container.sh`，并把日志、ccache
+和通过门禁的 ROM 上传到私有 OBS。贵阳资源、规格和运行步骤见
+[`CCI_RUNBOOK.md`](CCI_RUNBOOK.md)；执行器是
+[`scripts/cci-run.sh`](scripts/cci-run.sh)。
+
+CCI2 使用标准 `general-computing`（16 vCPU / 32 GiB）和额外 470 GiB 临时盘，
+总临时空间约 500 GiB。每次运行结束都会删除 Pod，避免闲置计费。不要把
+`credentials.csv` 或临时 OBS 凭证提交到仓库。
 
 ### 为什么在 ubuntu:18.04 容器里编译
 

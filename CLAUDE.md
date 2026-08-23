@@ -42,6 +42,9 @@ step differs.
 | `docker/Dockerfile` | — | local builder image; deps installed once |
 | `scripts/build-inner.sh` | container/host | local compile step, no timeout logic |
 | `scripts/build-in-container.sh` | ubuntu:18.04 | CI compile step, with timeout + resume |
+| `scripts/cci-run.sh` | local KooCLI | create, poll, and delete one Huawei CCI2 build Pod |
+| `scripts/cci-pod-entrypoint.sh` | CCI2 Pod | clone GitHub, sync, build, and upload OBS state |
+| `CCI_RUNBOOK.md` | — | verified Guiyang CCI2/SWR/OBS resources and constraints |
 | `scripts/sync-source.sh` | host | shared: repo init/sync, then both patch scripts |
 | `scripts/apply-device-patches.sh` | host | shared: the 3 BoardConfig.mk edits |
 | `scripts/apply-alice-patcher.sh` | host | shared: idempotent replacement for `patches.sh` |
@@ -119,6 +122,10 @@ step an `if: always()`-style guard so it cannot skip the verify/upload steps.
   not-a-failure so ccache still gets saved. Any other non-zero is a real error.
 - `source build/envsetup.sh` is wrapped in `set +u` / `set -u` — it references
   unset variables and would abort otherwise.
+- Git LFS must be hydrated inside the build container. The old CI failure left
+  `external/chromium-webview/prebuilt/arm64/webview.apk` as a 134-byte LFS
+  pointer; `build-in-container.sh` now runs `git lfs pull` and refuses to build
+  while any pointer remains.
 - ccache defaults to 6G against a **10GB per-repo cache budget**. Raising it can
   evict the entry entirely and make re-runs slower, not faster.
 
