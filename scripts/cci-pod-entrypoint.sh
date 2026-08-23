@@ -19,7 +19,6 @@ SOURCE_DIR="${SOURCE_DIR:-${WORK_ROOT}/source}"
 BUILDER_DIR="${BUILDER_DIR:-${WORK_ROOT}/builder}"
 CCACHE_DIR="${CCACHE_DIR:-${WORK_ROOT}/ccache}"
 OBS_ENDPOINT="${OBS_ENDPOINT:-https://obs.cn-southwest-2.myhuaweicloud.com}"
-OBSUTIL_URL="${OBSUTIL_URL:-https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz}"
 OBS_CONFIG="${WORK_ROOT}/.obsutilconfig"
 LOG_FILE="${WORK_ROOT}/cci-build.log"
 
@@ -28,7 +27,7 @@ exec > >(tee -a "${LOG_FILE}") 2>&1
 
 obs_upload() {
     local source="$1" destination="$2"
-    "${WORK_ROOT}/obsutil" cp "${source}" "obs://${OBS_BUCKET}/${destination}" \
+    "${OBSUTIL_BIN}" cp "${source}" "obs://${OBS_BUCKET}/${destination}" \
         -config="${OBS_CONFIG}" -u -f || echo "!! OBS upload failed: ${destination}" >&2
 }
 
@@ -36,10 +35,10 @@ finish() {
     local rc=$?
     set +e
     echo "==> Uploading run state (exit ${rc})"
-    if [ -x "${WORK_ROOT}/obsutil" ]; then
+    if [ -n "${OBSUTIL_BIN:-}" ] && [ -x "${OBSUTIL_BIN}" ]; then
         obs_upload "${LOG_FILE}" "runs/${RUN_ID}/cci-build.log"
         if [ -d "${CCACHE_DIR}" ]; then
-            "${WORK_ROOT}/obsutil" cp "${CCACHE_DIR}" \
+            "${OBSUTIL_BIN}" cp "${CCACHE_DIR}" \
                 "obs://${OBS_BUCKET}/cache/${GITHUB_REPO}/" -r -u -f \
                 -config="${OBS_CONFIG}" || true
         fi
@@ -58,28 +57,22 @@ finish() {
 }
 trap finish EXIT
 
-export DEBIAN_FRONTEND=noninteractive
-echo "==> Installing CCI build bootstrap dependencies"
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends ca-certificates curl git git-lfs python3 \
-    tar gzip rsync >/dev/null
+echo "==> Verifying preinstalled CCI builder dependencies"
+for tool in java python python3 git git-lfs repo obsutil curl tar gzip rsync; do
+    command -v "${tool}" >/dev/null || {
+        echo "!! required tool is missing from the builder image: ${tool}" >&2
+        exit 1
+    }
+done
+OBSUTIL_BIN="$(command -v obsutil)"
+echo "   java:   $(java -version 2>&1 | head -1)"
+echo "   python: $(python --version 2>&1)"
+echo "   git-lfs: $(git-lfs version)"
+echo "   repo:   $(repo --version 2>&1 | head -1)"
+echo "   obsutil: ${OBSUTIL_BIN}"
 
-echo "==> Installing obsutil"
-curl -fsSL "${OBSUTIL_URL}" -o "${WORK_ROOT}/obsutil.tar.gz"
-tar -xzf "${WORK_ROOT}/obsutil.tar.gz" -C "${WORK_ROOT}"
-obsutil_binary="$(find "${WORK_ROOT}" -type f -name obsutil -perm -u+x -print -quit)"
-[ -n "${obsutil_binary}" ] || { echo "!! obsutil binary not found" >&2; exit 1; }
-cp "${obsutil_binary}" "${WORK_ROOT}/obsutil"
-chmod 700 "${WORK_ROOT}/obsutil"
-"${WORK_ROOT}/obsutil" config -config="${OBS_CONFIG}" -e="${OBS_ENDPOINT}" \
+"${OBSUTIL_BIN}" config -config="${OBS_CONFIG}" -e="${OBS_ENDPOINT}" \
     -i="${OBS_ACCESS_KEY}" -k="${OBS_SECRET_KEY}" -t="${OBS_SECURITY_TOKEN}"
-rm -f "${WORK_ROOT}/obsutil.tar.gz"
-
-echo "==> Installing repo tool"
-mkdir -p /usr/local/bin
-curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
-    -o /usr/local/bin/repo
-chmod 755 /usr/local/bin/repo
 
 echo "==> Cloning ${GITHUB_REPO}@${GITHUB_REF}"
 rm -rf "${BUILDER_DIR}"
@@ -99,7 +92,7 @@ echo "==> Restoring ccache from OBS"
 
 echo "==> Building LineageOS inside the CCI Pod"
 set +e
-WORKDIR="${SOURCE_DIR}" CCACHE_DIR="${CCACHE_DIR}" \
+SKIP_APT_INSTALL=1 WORKDIR="${SOURCE_DIR}" CCACHE_DIR="${CCACHE_DIR}" \
     bash "${BUILDER_DIR}/scripts/build-in-container.sh"
 build_rc=$?
 set -e

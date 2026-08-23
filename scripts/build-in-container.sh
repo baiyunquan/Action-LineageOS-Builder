@@ -23,28 +23,30 @@ JOBS="${JOBS:-$(nproc)}"
 BUILD_TIMEOUT="${BUILD_TIMEOUT:-290m}"
 CCACHE_SIZE="${CCACHE_SIZE:-8G}"
 
-echo "==> Installing build dependencies (bionic)"
-export DEBIAN_FRONTEND=noninteractive
+if [ "${SKIP_APT_INSTALL:-0}" = 1 ]; then
+    echo "==> Using dependencies preinstalled in the CCI builder image"
+else
+    echo "==> Installing build dependencies (bionic)"
+    export DEBIAN_FRONTEND=noninteractive
 
-# 18.04 is still under ESM, so bionic packages remain on archive.ubuntu.com.
-# They are NOT on old-releases -- that mirror 404s for dists/bionic/Release, and
-# rewriting the sources to point at it breaks an otherwise working config.
-# Only fall back if the default mirror ever stops serving bionic.
-if ! apt-get update -qq; then
-    echo "   default mirror failed, retrying against old-releases"
-    sed -i -e 's|archive.ubuntu.com|old-releases.ubuntu.com|g' \
-           -e 's|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list
-    apt-get update -qq || { echo "!! apt-get update failed" >&2; exit 1; }
+    # 18.04 is still served by the main archive.  Only fall back if the
+    # inherited base image has a stale mirror configuration.
+    if ! apt-get update -qq; then
+        echo "   default mirror failed, retrying against old-releases"
+        sed -i -e 's|archive.ubuntu.com|old-releases.ubuntu.com|g' \
+               -e 's|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list
+        apt-get update -qq || { echo "!! apt-get update failed" >&2; exit 1; }
+    fi
+
+    apt-get install -y -qq --no-install-recommends \
+        openjdk-8-jdk \
+        bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
+        gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev \
+        liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \
+        libwxgtk3.0-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool \
+        squashfs-tools xsltproc zip zlib1g-dev unzip python python-minimal git-lfs \
+        > /dev/null || { echo "!! dependency install failed" >&2; exit 1; }
 fi
-
-apt-get install -y -qq --no-install-recommends \
-    openjdk-8-jdk \
-    bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
-    gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev \
-    liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \
-    libwxgtk3.0-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool \
-    squashfs-tools xsltproc zip zlib1g-dev unzip python python-minimal git-lfs \
-    > /dev/null || { echo "!! dependency install failed" >&2; exit 1; }
 
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 export PATH="${JAVA_HOME}/bin:${PATH}"
@@ -52,7 +54,7 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 # Fail here rather than 40 minutes later inside the build. A missing python2 in
 # particular shows up as a confusing "roomservice.py: No such file or directory"
 # (the shebang interpreter is what is actually missing).
-for tool in java python curl git git-lfs; do
+for tool in java python python3 curl git git-lfs repo obsutil; do
     command -v "${tool}" >/dev/null || { echo "!! ${tool} not installed" >&2; exit 1; }
 done
 echo "   java:   $(java -version 2>&1 | head -1)"

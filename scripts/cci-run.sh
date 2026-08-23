@@ -19,6 +19,7 @@ OBS_ENDPOINT="${OBS_ENDPOINT:-https://obs.cn-southwest-2.myhuaweicloud.com}"
 RUN_ID="${RUN_ID:-cci-$(date -u +%Y%m%d-%H%M%S)}"
 POD_NAME="${POD_NAME:-cam-tl00-build-${RUN_ID#cci-}}"
 POD_NAME="${POD_NAME,,}"
+CCI_STATUS_FILE="${CCI_STATUS_FILE:-${TMPDIR:-/tmp}/cci-status-${POD_NAME}.json}"
 
 : "${OBS_ACCESS_KEY:?export OBS_ACCESS_KEY with a fresh temporary AK}"
 : "${OBS_SECRET_KEY:?export OBS_SECRET_KEY with a fresh temporary SK}"
@@ -114,7 +115,61 @@ if obj.get("status") == "Failure":
 print("pod uid:", obj.get("metadata", {}).get("uid", "unknown"))
 PY
 
+save_pod_status() {
+    local raw_file status_file obs_config
+    raw_file="$(mktemp)"
+    if ! hcloud CCI readNamespacedPod --cli-region="${CCI_REGION}" \
+        --namespace="${CCI_NAMESPACE}" --name="${POD_NAME}" >"${raw_file}" 2>/dev/null; then
+        rm -f "${raw_file}"
+        return 0
+    fi
+    status_file="${CCI_STATUS_FILE}"
+    python3 - "${raw_file}" "${status_file}" <<'PY'
+import json, sys
+raw = open(sys.argv[1], encoding="utf-8").read()
+start = raw.find("{")
+if start < 0:
+    raise SystemExit(0)
+obj = json.loads(raw[start:])
+status = obj.get("status", {})
+safe = {
+    "metadata": {key: obj.get("metadata", {}).get(key) for key in
+                 ("name", "namespace", "uid", "creationTimestamp")},
+    "status": {
+        "phase": status.get("phase"),
+        "conditions": status.get("conditions", []),
+        "containerStatuses": [],
+    },
+}
+for item in status.get("containerStatuses", []) or []:
+    safe["status"]["containerStatuses"].append({
+        key: item.get(key) for key in
+        ("name", "ready", "restartCount", "imageID", "state", "lastState")
+    })
+with open(sys.argv[2], "w", encoding="utf-8") as stream:
+    json.dump(safe, stream, indent=2, ensure_ascii=False)
+    stream.write("\n")
+PY
+    rm -f "${raw_file}"
+    if [ -s "${status_file}" ]; then
+        echo "==> Saved sanitized Pod status to ${status_file}"
+        if command -v obsutil >/dev/null 2>&1; then
+            obs_config="$(mktemp)"
+            umask 077
+            if obsutil config -config="${obs_config}" -e="${OBS_ENDPOINT}" \
+                -i="${OBS_ACCESS_KEY}" -k="${OBS_SECRET_KEY}" -t="${OBS_SECURITY_TOKEN}" \
+                >/dev/null 2>&1; then
+                obsutil cp "${status_file}" \
+                    "obs://${OBS_BUCKET}/runs/${RUN_ID}/cci-pod-status.json" \
+                    -config="${obs_config}" -u -f >/dev/null 2>&1 || true
+            fi
+            rm -f "${obs_config}"
+        fi
+    fi
+}
+
 delete_pod() {
+    save_pod_status
     if [ "${CCI_KEEP_POD:-0}" = 1 ]; then
         echo "==> CCI_KEEP_POD=1; leaving ${POD_NAME} for inspection"
         rm -f "${input_file}" "${create_output}"
@@ -136,7 +191,9 @@ while :; do
     fi
     phase="$(python3 - "${status_file}" <<'PY'
 import json, sys
-obj = json.load(open(sys.argv[1], encoding="utf-8"))
+raw = open(sys.argv[1], encoding="utf-8").read()
+start = raw.find("{")
+obj = json.loads(raw[start:])
 print(obj.get("status", {}).get("phase", "Unknown"))
 PY
     )"
