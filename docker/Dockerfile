@@ -11,11 +11,26 @@
 #   docker build -t lineageos-15.1-builder docker/
 FROM ubuntu:18.04
 
-# Do NOT rewrite these to old-releases.ubuntu.com. 18.04 is still under ESM, so
-# bionic lives on the main archive; old-releases returns 404 for
-# dists/bionic/Release and rewriting breaks a working config. (Verified the hard
-# way -- it cost a CI run.)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ARG APT_MIRROR_PRIMARY=https://repo.huaweicloud.com/ubuntu
+ARG APT_MIRROR_FALLBACK=https://mirrors.aliyun.com/ubuntu
+
+# Do NOT rewrite these to old-releases.ubuntu.com. 18.04's bionic Release is
+# available from Huawei's mirror and Aliyun's mirror; old-releases returns 404.
+RUN set -Eeuo pipefail; \
+    write_sources() { \
+      printf '%s\n' \
+        "deb $${1%/} bionic main restricted universe multiverse" \
+        "deb $${1%/} bionic-updates main restricted universe multiverse" \
+        "deb $${1%/} bionic-security main restricted universe multiverse" \
+        > /etc/apt/sources.list; \
+    }; \
+    write_sources "$${APT_MIRROR_PRIMARY}"; \
+    if ! apt-get update; then \
+      echo 'Huawei apt mirror failed; retrying Aliyun' >&2; \
+      write_sources "$${APT_MIRROR_FALLBACK}"; \
+      apt-get update; \
+    fi; \
+    apt-get install -y --no-install-recommends \
         openjdk-8-jdk \
         bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
         git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev \

@@ -104,11 +104,14 @@ CI 版里的 `timeout 290m` + 退出码 75 + ccache 保存，**纯粹是为了�
 
 ### 1. bionic 的 apt 源不能改 old-releases
 
-Ubuntu 18.04 仍在 ESM 期内，包仍然在 `archive.ubuntu.com` 上。
-实测 `old-releases.ubuntu.com/ubuntu/dists/bionic/Release` 返回 **404**，
-而 `archive.ubuntu.com` 返回 **200**。
+Ubuntu 18.04 的包不能指向 `old-releases.ubuntu.com`（该站点的 bionic
+Release 返回 **404**）。容器脚本和 CCI Dockerfile 现在使用一次性的源列表，
+优先 `https://repo.huaweicloud.com/ubuntu`，失败时回退
+`https://mirrors.aliyun.com/ubuntu`；两个镜像都保留 `bionic-security`。
+这样既能利用华为云 ECS/CCI 的镜像站，又不会改写宿主机或基础镜像的 apt 配置。
 
-把源改写到 old-releases 会让**所有包**都找不到。`Dockerfile` 里因此不做任何改写。
+Android/Lineage 源码本身仍从 GitHub 获取；目前没有可验证的华为云或阿里云
+完整 Git/LFS 镜像，不能把 GitHub 地址盲目替换成第三方镜像。
 
 ### 2. `set -u` 会打断 `lunch`
 

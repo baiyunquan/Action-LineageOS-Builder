@@ -8,20 +8,25 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG OBSUTIL_URL=https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz
 ARG GIT_LFS_VERSION=3.5.1
+ARG APT_MIRROR_PRIMARY=https://repo.huaweicloud.com/ubuntu
+ARG APT_MIRROR_FALLBACK=https://mirrors.aliyun.com/ubuntu
 
 # Bionic's public archive is still available, but old-releases.ubuntu.com no
-# longer carries bionic.  Replace inherited sources explicitly and disable the
+# longer carries bionic.  Prefer Huawei's documented Ubuntu mirror and fall
+# back to Aliyun if the ECS/CCI network cannot reach Huawei.  Disable the
 # expiry check so a cached CCI base cannot make apt fail with an opaque 100.
 # Every apt operation is logged before its error is re-raised; Kaniko therefore
 # leaves useful diagnostics in the build log and in /var/log/cci-builder-apt.log.
 RUN set -Eeuo pipefail; \
     test "$(dpkg --print-architecture)" = amd64; \
     mkdir -p /var/log; \
-    printf '%s\n' \
-      'deb http://archive.ubuntu.com/ubuntu bionic main restricted universe multiverse' \
-      'deb http://archive.ubuntu.com/ubuntu bionic-updates main restricted universe multiverse' \
-      'deb http://security.ubuntu.com/ubuntu bionic-security main restricted universe multiverse' \
-      > /etc/apt/sources.list; \
+    write_sources() { \
+      printf '%s\n' \
+        "deb $${1%/} bionic main restricted universe multiverse" \
+        "deb $${1%/} bionic-updates main restricted universe multiverse" \
+        "deb $${1%/} bionic-security main restricted universe multiverse" \
+        > /etc/apt/sources.list; \
+    }; \
     printf '%s\n' \
       'Acquire::Check-Valid-Until "false";' \
       'Acquire::Retries "3";' \
@@ -33,7 +38,12 @@ RUN set -Eeuo pipefail; \
       }; \
     }; \
     : > /var/log/cci-builder-apt.log; \
-    apt_run apt-get update; \
+    write_sources "$${APT_MIRROR_PRIMARY}"; \
+    if ! apt_run apt-get update; then \
+      echo "### Huawei apt mirror failed; retrying Aliyun" >&2; \
+      write_sources "$${APT_MIRROR_FALLBACK}"; \
+      apt_run apt-get update; \
+    fi; \
     apt_run env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates curl git python3 tar gzip rsync \
       openjdk-8-jdk \

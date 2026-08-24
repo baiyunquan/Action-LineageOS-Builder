@@ -15,7 +15,7 @@ DanteFX 编译的通用 hi6210sft **LineageOS 14.1 已实测可用，WiFi、通�
 
 | Run | 结果 | 修复 |
 |---|---|---|
-| 1 | apt 全部包找不到 | `sed` 把源改到 old-releases 是**写反的** —— bionic 仍在 `archive.ubuntu.com`（实测 old-releases 对 `dists/bionic/Release` 返回 404）。同时补上被忽略的 apt 退出码检查 |
+| 1 | apt 全部包找不到 | `sed` 把源改到 old-releases 是**写反的** —— bionic 在华为云镜像可用，脚本现在优先 `repo.huaweicloud.com/ubuntu`，失败回退阿里云，同时检查 apt 退出码 |
 | 2 | `exit 127` | `timeout ... mka` —— `mka` 是 `envsetup.sh` 定义的 shell 函数，无法被 exec。改用 `make -j N bacon` |
 | 3 | 编译到 5% (4878/92680) 后失败 | Jack server 在容器内 SSL 握手失败。改用 javac（`ANDROID_COMPILE_WITH_JACK=false`） |
 | 4 | 连续编译约 2 小时后，`Save ccache` 步骤失败 | **未确认**：该步失败导致后续校验/上传被跳过，编译本身是否产出 zip 未能查证 |

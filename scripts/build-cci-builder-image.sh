@@ -11,6 +11,10 @@ CCI_INSTANCE_TYPE="${CCI_INSTANCE_TYPE:-general-computing}"
 CCI_POD_SIZE="${CCI_POD_SIZE:-4.00_8.0}"
 CCI_EXTRA_STORAGE_GIB="${CCI_EXTRA_STORAGE_GIB:-20}"
 CCI_DEADLINE_SECONDS="${CCI_DEADLINE_SECONDS:-3600}"
+# The default CCI network already has outbound access to GitHub and private
+# SWR/OBS endpoints.  EIP allocation is optional and currently exhausts the
+# Guiyang pool, so opt in only when a dedicated EIP is required.
+CCI_WITH_EIP="${CCI_WITH_EIP:-0}"
 GITHUB_REPO="${GITHUB_REPO:-baiyunquan/Action-LineageOS-Builder}"
 GITHUB_REF="${GITHUB_REF:-main}"
 SWR_REGISTRY="${SWR_REGISTRY:-swr.cn-southwest-2.myhuaweicloud.com}"
@@ -20,6 +24,7 @@ KANIKO_IMAGE="${KANIKO_IMAGE:-${SWR_REGISTRY}/${SWR_NAMESPACE}/kaniko-executor@s
 RUN_ID="${RUN_ID:-cci-builder-$(date -u +%Y%m%d-%H%M%S)}"
 POD_NAME="${POD_NAME:-cam-tl00-builder-${RUN_ID#cci-builder-}}"
 POD_NAME="${POD_NAME,,}"
+SECRET_NAME="${SECRET_NAME:-cam-tl00-kaniko-auth-${RUN_ID#cci-builder-}}"
 CANDIDATE_TAG="${CANDIDATE_TAG:-preinstalled-${RUN_ID#cci-builder-}}"
 TARGET_IMAGE="${SWR_REGISTRY}/${SWR_NAMESPACE}/${IMAGE_REPOSITORY}:${CANDIDATE_TAG}"
 
@@ -33,6 +38,10 @@ cleanup() {
     if [ "${POD_CREATED:-0}" = 1 ]; then
         hcloud CCI deleteNamespacedPod --cli-region="${CCI_REGION}" \
             --namespace="${CCI_NAMESPACE}" --name="${POD_NAME}" >/dev/null 2>&1 || true
+    fi
+    if [ "${SECRET_CREATED:-0}" = 1 ]; then
+        hcloud CCI deleteNamespacedSecret --cli-region="${CCI_REGION}" \
+            --namespace="${CCI_NAMESPACE}" --name="${SECRET_NAME}" >/dev/null 2>&1 || true
     fi
     python3 - "${tmp_dir}" <<'PY'
 import shutil, sys
@@ -50,8 +59,28 @@ crane auth login "${SWR_REGISTRY}" --username token --password "${SWR_AUTH}" >/d
 
 manifest="${tmp_dir}/pod.json"
 export CCI_REGION CCI_NAMESPACE CCI_INSTANCE_TYPE CCI_POD_SIZE CCI_EXTRA_STORAGE_GIB \
-    CCI_DEADLINE_SECONDS GITHUB_REPO GITHUB_REF SWR_REGISTRY SWR_NAMESPACE \
-    IMAGE_REPOSITORY KANIKO_IMAGE RUN_ID POD_NAME TARGET_IMAGE SWR_AUTH
+    CCI_DEADLINE_SECONDS CCI_WITH_EIP GITHUB_REPO GITHUB_REF SWR_REGISTRY SWR_NAMESPACE \
+    IMAGE_REPOSITORY KANIKO_IMAGE RUN_ID POD_NAME SECRET_NAME TARGET_IMAGE SWR_AUTH
+secret_manifest="${tmp_dir}/secret.json"
+python3 - "${secret_manifest}" <<'PY'
+import json, os, sys
+registry = os.environ["SWR_REGISTRY"]
+docker_config = json.dumps({"auths": {registry: {"auth": os.environ["SWR_AUTH"]}}}, separators=(",", ":"))
+body = {
+    "apiVersion": "cci/v2",
+    "kind": "Secret",
+    "metadata": {"name": os.environ["SECRET_NAME"], "namespace": os.environ["CCI_NAMESPACE"]},
+    "type": "kubernetes.io/dockerconfigjson",
+    "stringData": {".dockerconfigjson": docker_config},
+}
+with open(sys.argv[1], "w", encoding="utf-8") as stream:
+    json.dump({"path": {"namespace": os.environ["CCI_NAMESPACE"]}, "query": {}, "body": body}, stream)
+PY
+echo "==> Creating temporary Kaniko registry Secret"
+hcloud CCI createNamespacedSecret --cli-region="${CCI_REGION}" \
+    --namespace="${CCI_NAMESPACE}" --cli-jsonInput="${secret_manifest}" >/dev/null
+SECRET_CREATED=1
+
 python3 - "${manifest}" <<'PY'
 import json, os, sys
 
@@ -61,15 +90,11 @@ top = repo.rsplit("/", 1)[-1] + "-" + ref
 destination = os.environ["TARGET_IMAGE"]
 registry = os.environ["SWR_REGISTRY"]
 command = [
-    "/busybox/sh", "-c",
-    "set -eu; mkdir -p /kaniko/.docker; "
-    "printf '{\"auths\":{\"%s\":{\"auth\":\"%s\"}}}\n' "
-    "'" + registry + "' \"$SWR_AUTH\" > /kaniko/.docker/config.json; "
-    "/kaniko/executor "
-    "--context=https://github.com/" + repo + "/archive/refs/heads/" + ref + ".tar.gz "
-    "--dockerfile=" + top + "/docker/cci-builder.Dockerfile "
-    "--destination=" + destination + " "
-    "--custom-platform=linux/amd64 --cache=false --verbosity=info",
+    "/kaniko/executor",
+    "--context=https://github.com/" + repo + "/archive/refs/heads/" + ref + ".tar.gz",
+    "--dockerfile=" + top + "/docker/cci-builder.Dockerfile",
+    "--destination=" + destination,
+    "--custom-platform=linux/amd64", "--cache=false", "--verbosity=info",
 ]
 body = {
     "apiVersion": "cci/v2",
@@ -81,10 +106,6 @@ body = {
         "annotations": {
             "resource.cci.io/instance-type": os.environ["CCI_INSTANCE_TYPE"],
             "resource.cci.io/pod-size-specs": os.environ["CCI_POD_SIZE"],
-            "yangtse.io/pod-with-eip": "true",
-            "yangtse.io/eip-bandwidth-size": "5",
-            "yangtse.io/eip-network-type": "5_bgp",
-            "yangtse.io/eip-charge-mode": "traffic",
         },
     },
     "spec": {
@@ -95,11 +116,19 @@ body = {
             "name": "kaniko",
             "image": os.environ["KANIKO_IMAGE"],
             "command": command,
-            "env": [{"name": "SWR_AUTH", "value": os.environ["SWR_AUTH"]}],
+            "volumeMounts": [{"name": "docker-config", "mountPath": "/kaniko/.docker"}],
             "terminationMessagePath": "/dev/termination-log",
         }],
+        "volumes": [{"name": "docker-config", "secret": {"secretName": os.environ["SECRET_NAME"]}}],
     },
 }
+if os.environ["CCI_WITH_EIP"] == "1":
+    body["metadata"]["annotations"].update({
+        "yangtse.io/pod-with-eip": "true",
+        "yangtse.io/eip-bandwidth-size": "5",
+        "yangtse.io/eip-network-type": "5_bgp",
+        "yangtse.io/eip-charge-mode": "traffic",
+    })
 with open(sys.argv[1], "w", encoding="utf-8") as stream:
     json.dump({"path": {"namespace": os.environ["CCI_NAMESPACE"]},
                "query": {}, "body": body}, stream)

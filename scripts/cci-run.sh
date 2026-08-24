@@ -12,6 +12,7 @@ CCI_INSTANCE_TYPE="${CCI_INSTANCE_TYPE:-general-computing}"
 CCI_POD_SIZE="${CCI_POD_SIZE:-16.00_32.0}"
 CCI_EXTRA_STORAGE_GIB="${CCI_EXTRA_STORAGE_GIB:-470}"
 CCI_DEADLINE_SECONDS="${CCI_DEADLINE_SECONDS:-21600}"
+CCI_WITH_EIP="${CCI_WITH_EIP:-0}"
 GITHUB_REPO="${GITHUB_REPO:-baiyunquan/Action-LineageOS-Builder}"
 GITHUB_REF="${GITHUB_REF:-main}"
 OBS_BUCKET="${OBS_BUCKET:-cam-tl00-ci-019e42eb6d98}"
@@ -32,7 +33,7 @@ create_output="$(mktemp)"
 trap 'rm -f "${input_file}" "${create_output}"' EXIT
 
 export POD_NAME CCI_NAMESPACE CCI_INSTANCE_TYPE CCI_POD_SIZE CCI_EXTRA_STORAGE_GIB \
-    CCI_DEADLINE_SECONDS CCI_IMAGE GITHUB_REPO GITHUB_REF OBS_BUCKET OBS_ENDPOINT RUN_ID \
+    CCI_DEADLINE_SECONDS CCI_WITH_EIP CCI_IMAGE GITHUB_REPO GITHUB_REF OBS_BUCKET OBS_ENDPOINT RUN_ID \
     OBS_ACCESS_KEY OBS_SECRET_KEY OBS_SECURITY_TOKEN
 
 python3 - "${input_file}" <<'PY'
@@ -61,10 +62,6 @@ body = {
         "annotations": {
             "resource.cci.io/instance-type": os.environ["CCI_INSTANCE_TYPE"],
             "resource.cci.io/pod-size-specs": os.environ["CCI_POD_SIZE"],
-            "yangtse.io/pod-with-eip": "true",
-            "yangtse.io/eip-bandwidth-size": "5",
-            "yangtse.io/eip-network-type": "5_bgp",
-            "yangtse.io/eip-charge-mode": "traffic",
         },
     },
     "spec": {
@@ -82,6 +79,13 @@ body = {
         }],
     },
 }
+if os.environ["CCI_WITH_EIP"] == "1":
+    body["metadata"]["annotations"].update({
+        "yangtse.io/pod-with-eip": "true",
+        "yangtse.io/eip-bandwidth-size": "5",
+        "yangtse.io/eip-network-type": "5_bgp",
+        "yangtse.io/eip-charge-mode": "traffic",
+    })
 with open(sys.argv[1], "w", encoding="utf-8") as stream:
     json.dump({"path": {"namespace": namespace}, "query": {}, "body": body}, stream)
 PY

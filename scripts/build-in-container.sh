@@ -29,16 +29,39 @@ else
     echo "==> Installing build dependencies (bionic)"
     export DEBIAN_FRONTEND=noninteractive
 
-    # 18.04 is still served by the main archive.  Only fall back if the
-    # inherited base image has a stale mirror configuration.
-    if ! apt-get update -qq; then
-        echo "   default mirror failed, retrying against old-releases"
-        sed -i -e 's|archive.ubuntu.com|old-releases.ubuntu.com|g' \
-               -e 's|security.ubuntu.com|old-releases.ubuntu.com|g' /etc/apt/sources.list
-        apt-get update -qq || { echo "!! apt-get update failed" >&2; exit 1; }
-    fi
+    # Huawei's official mirror documents Ubuntu at repo.huaweicloud.com.  The
+    # Aliyun mirror is a practical fallback for regions where the Huawei CDN
+    # is unavailable.  Keep this source list private to this invocation so we
+    # do not mutate the base image's apt configuration.
+    APT_MIRROR_PRIMARY="${APT_MIRROR_PRIMARY:-https://repo.huaweicloud.com/ubuntu}"
+    APT_MIRROR_FALLBACK="${APT_MIRROR_FALLBACK:-https://mirrors.aliyun.com/ubuntu}"
+    apt_source_list="$(mktemp /tmp/lineage-apt-sources.XXXXXX)"
+    apt_get=(apt-get -o "Dir::Etc::sourcelist=${apt_source_list}" \
+        -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0)
+    write_bionic_sources() {
+        local mirror="${1%/}"
+        printf '%s\n' \
+            "deb ${mirror} bionic main restricted universe multiverse" \
+            "deb ${mirror} bionic-updates main restricted universe multiverse" \
+            "deb ${mirror} bionic-security main restricted universe multiverse" \
+            >"${apt_source_list}"
+    }
+    apt_mirror=""
+    for candidate in "${APT_MIRROR_PRIMARY}" "${APT_MIRROR_FALLBACK}"; do
+        write_bionic_sources "${candidate}"
+        if "${apt_get[@]}" update -qq; then
+            apt_mirror="${candidate}"
+            echo "   apt mirror: ${candidate}"
+            break
+        fi
+        echo "   apt mirror failed: ${candidate}" >&2
+    done
+    [[ -n "${apt_mirror}" ]] || {
+        echo "!! Huawei and Aliyun apt mirrors are unavailable" >&2
+        exit 1
+    }
 
-    apt-get install -y -qq --no-install-recommends \
+    "${apt_get[@]}" install -y -qq --no-install-recommends \
         openjdk-8-jdk \
         bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
         gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev \
@@ -46,6 +69,7 @@ else
         libwxgtk3.0-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool \
         squashfs-tools xsltproc zip zlib1g-dev unzip python python-minimal git-lfs \
         > /dev/null || { echo "!! dependency install failed" >&2; exit 1; }
+    rm -f "${apt_source_list}"
 fi
 
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
