@@ -11,6 +11,8 @@
 #   ./scripts/build-local.sh --skip-sync        rebuild without re-syncing
 #   ./scripts/build-local.sh --native           build directly on the host
 #   ./scripts/build-local.sh --shell            drop into the build container
+#   ./scripts/build-local.sh --resume           reuse the last container/image checkpoint
+#   ./scripts/build-local.sh --checkpoint-interval 15m
 #
 # NOTE: this script has not been run end to end. It is written from the four
 # failures the CI path hit (see LOCAL_BUILD.md), but the local path itself is
@@ -29,6 +31,11 @@ LUNCH_TARGET="${LUNCH_TARGET:-lineage_alice-userdebug}"
 BUILD_TARGET="${BUILD_TARGET:-bacon}"
 JOBS="${JOBS:-$(nproc)}"
 CCACHE_SIZE="${CCACHE_SIZE:-50G}"
+CHECKPOINT_ENABLE="${CHECKPOINT_ENABLE:-1}"
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-15m}"
+CHECKPOINT_IMAGE="${CHECKPOINT_IMAGE:-}"
+CONTAINER_NAME="${CONTAINER_NAME:-lineageos-15.1-build}"
+RESUME=0
 
 MODE=docker
 DO_SYNC=1
@@ -43,10 +50,23 @@ while [ $# -gt 0 ]; do
         --native)      MODE=native; shift ;;
         --skip-sync)   DO_SYNC=0; shift ;;
         --shell)       DO_SHELL=1; shift ;;
+        --resume)      RESUME=1; shift ;;
+        --checkpoint-interval) CHECKPOINT_INTERVAL="$2"; shift 2 ;;
+        --checkpoint-image) CHECKPOINT_IMAGE="$2"; shift 2 ;;
+        --container-name) CONTAINER_NAME="$2"; shift 2 ;;
+        --no-checkpoint) CHECKPOINT_ENABLE=0; shift ;;
         -h|--help)     sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
         *)             echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+CHECKPOINT_DIR="${CHECKPOINT_DIR:-${BUILDROOT}/checkpoints}"
+CHECKPOINT_IMAGE="${CHECKPOINT_IMAGE:-${IMAGE}:checkpoint}"
+
+if [ "${CHECKPOINT_ENABLE}" -eq 1 ] && [ -z "${CHECKPOINT_INTERVAL}" ]; then
+    echo "!! --checkpoint-interval must not be empty" >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------- preflight --
 
@@ -63,7 +83,8 @@ EOF
     exit 1
 fi
 
-mkdir -p "${BUILDROOT}"
+mkdir -p "${BUILDROOT}" "${CHECKPOINT_DIR}"
+printf '%s\n' 'driver-start' >"${CHECKPOINT_DIR}/current-stage"
 
 avail_kb="$(df -Pk "${BUILDROOT}" | awk 'NR==2 {print $4}')"
 avail_gb=$(( avail_kb / 1024 / 1024 ))
@@ -123,7 +144,7 @@ if [ "${MODE}" = native ]; then
     [ "${DO_SHELL}" -eq 1 ] && exec bash
     WORKDIR="${WORKDIR}" LUNCH_TARGET="${LUNCH_TARGET}" JOBS="${JOBS}" \
     CCACHE_DIR="${CCACHE_DIR}" CCACHE_SIZE="${CCACHE_SIZE}" \
-    BUILD_TARGET="${BUILD_TARGET}" \
+    BUILD_TARGET="${BUILD_TARGET}" CHECKPOINT_DIR="${CHECKPOINT_DIR}" \
         bash "${SCRIPTDIR}/build-inner.sh"
 else
     if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
@@ -131,15 +152,112 @@ else
         docker build -t "${IMAGE}" "${REPODIR}/docker"
     fi
 
+    # Docker 29 renamed the old --pause=false spelling to --no-pause.
+    commit_help="$(docker commit --help 2>&1 || true)"
+    if [[ "${commit_help}" == *'--no-pause'* ]]; then
+        docker_commit_no_pause=(--no-pause)
+    else
+        docker_commit_no_pause=(--pause=false)
+    fi
+
+    checkpoint_pid=''
+    checkpoint_active=0
+
+    checkpoint_commit() {
+        [ "${CHECKPOINT_ENABLE}" -eq 1 ] || return 0
+        docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1 || return 0
+
+        local stage='unknown'
+        local timestamp
+        if [ -r "${CHECKPOINT_DIR}/current-stage" ]; then
+            stage="$(head -n 1 "${CHECKPOINT_DIR}/current-stage")"
+        fi
+        # Stage text is written into a Docker LABEL; keep it bounded and safe.
+        stage="${stage//[^[:alnum:]_.-]/_}"
+        stage="${stage:0:64}"
+        timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+        echo "==> Committing Docker checkpoint (${stage}) as ${CHECKPOINT_IMAGE}"
+        if docker commit "${docker_commit_no_pause[@]}" \
+            --change "LABEL com.liaic.lineage.checkpoint=${stage}" \
+            "${CONTAINER_NAME}" "${CHECKPOINT_IMAGE}" >/dev/null; then
+            printf '%s\t%s\t%s\n' "${timestamp}" "${stage}" "${CHECKPOINT_IMAGE}" \
+                >> "${CHECKPOINT_DIR}/commits.log"
+        else
+            echo "!! Docker checkpoint commit failed; bind-mounted build state is still on disk" >&2
+            return 1
+        fi
+    }
+
+    checkpoint_loop() {
+        while :; do
+            sleep "${CHECKPOINT_INTERVAL}" || return 0
+            local running
+            running="$(docker inspect --format '{{.State.Running}}' \
+                "${CONTAINER_NAME}" 2>/dev/null || true)"
+            [ "${running}" = true ] || return 0
+            checkpoint_commit || true
+        done
+    }
+
+    start_checkpoint_monitor() {
+        [ "${CHECKPOINT_ENABLE}" -eq 1 ] || return 0
+        checkpoint_loop &
+        checkpoint_pid=$!
+    }
+
+    stop_checkpoint_monitor() {
+        [ -n "${checkpoint_pid}" ] || return 0
+        kill "${checkpoint_pid}" 2>/dev/null || true
+        wait "${checkpoint_pid}" 2>/dev/null || true
+        checkpoint_pid=''
+    }
+
+    checkpoint_cleanup() {
+        stop_checkpoint_monitor
+        if [ "${checkpoint_active}" -eq 1 ]; then
+            checkpoint_commit || true
+            checkpoint_active=0
+        fi
+    }
+
+    trap checkpoint_cleanup EXIT
+
+    container_exists=0
+    container_running=false
+    if docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+        container_exists=1
+        container_running="$(docker inspect --format '{{.State.Running}}' \
+            "${CONTAINER_NAME}")"
+    fi
+    if [ "${container_exists}" -eq 1 ] && [ "${RESUME}" -ne 1 ]; then
+        echo "!! container ${CONTAINER_NAME} already exists; use --resume or remove it explicitly" >&2
+        exit 2
+    fi
+    if [ "${container_running}" = true ]; then
+        echo "!! container ${CONTAINER_NAME} is already running; stop/inspect it before resuming" >&2
+        exit 2
+    fi
+
+    run_image="${IMAGE}"
+    if [ "${RESUME}" -eq 1 ] && [ "${container_exists}" -eq 0 ] \
+        && [ "${CHECKPOINT_ENABLE}" -eq 1 ] \
+        && docker image inspect "${CHECKPOINT_IMAGE}" >/dev/null 2>&1; then
+        run_image="${CHECKPOINT_IMAGE}"
+        echo "==> Resuming from Docker image ${run_image}; mounted out/ and ccache remain on disk"
+    fi
+
     # Run as the invoking user so out/ and ccache do not end up root-owned.
     # HOME must be supplied explicitly because that uid has no passwd entry.
     docker_args=(
-        --rm
+        --name "${CONTAINER_NAME}"
+        --label "com.liaic.lineage.build=15.1"
         -v "${BUILDROOT}:${BUILDROOT}"
         -v "${REPODIR}:${REPODIR}:ro"
         -u "$(id -u):$(id -g)"
         -e HOME="${BUILDROOT}/home"
         -e WORKDIR="${WORKDIR}"
+        -e CHECKPOINT_DIR="${CHECKPOINT_DIR}"
         -e CCACHE_DIR="${CCACHE_DIR}"
         -e CCACHE_SIZE="${CCACHE_SIZE}"
         -e LUNCH_TARGET="${LUNCH_TARGET}"
@@ -147,15 +265,48 @@ else
         -e JOBS="${JOBS}"
         -w "${WORKDIR}"
     )
+    case "${CHECKPOINT_DIR}" in
+        "${BUILDROOT}"/*) ;;
+        *) docker_args+=( -v "${CHECKPOINT_DIR}:${CHECKPOINT_DIR}" ) ;;
+    esac
 
     if [ "${DO_SHELL}" -eq 1 ]; then
-        echo "==> Shell in ${IMAGE}"
-        exec docker run -it "${docker_args[@]}" "${IMAGE}" bash
+        if [ "${container_exists}" -eq 1 ]; then
+            echo "==> Resuming interactive shell in ${CONTAINER_NAME}"
+            exec docker start -ai "${CONTAINER_NAME}"
+        fi
+        echo "==> Shell in ${run_image}"
+        exec docker run -it "${docker_args[@]}" "${run_image}" bash
     fi
 
-    echo "==> Building in ${IMAGE} (-j${JOBS})"
-    docker run "${docker_args[@]}" "${IMAGE}" \
-        bash "${SCRIPTDIR}/build-inner.sh"
+    build_rc=0
+    if [ "${container_exists}" -eq 1 ]; then
+        echo "==> Resuming stopped container ${CONTAINER_NAME}"
+        checkpoint_active=1
+        start_checkpoint_monitor
+        set +e
+        docker start -a "${CONTAINER_NAME}"
+        build_rc=$?
+        set -e
+    else
+        echo "==> Building in ${run_image} (-j${JOBS}); container is kept for resume"
+        checkpoint_active=1
+        start_checkpoint_monitor
+        set +e
+        docker run "${docker_args[@]}" "${run_image}" \
+            bash "${SCRIPTDIR}/build-inner.sh"
+        build_rc=$?
+        set -e
+    fi
+    stop_checkpoint_monitor
+    checkpoint_commit || true
+    checkpoint_active=0
+
+    if [ "${build_rc}" -ne 0 ]; then
+        echo "!! build stopped with exit ${build_rc}; state was kept in ${CONTAINER_NAME}" >&2
+        echo "   resume: $0 --workdir '${BUILDROOT}' --skip-sync --resume" >&2
+        exit "${build_rc}"
+    fi
 fi
 
 # ------------------------------------------------------------------- verify --

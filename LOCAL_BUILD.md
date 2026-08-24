@@ -51,8 +51,11 @@ cd Action-LineageOS-Builder
 # 完整编译（首次会拉约 30GB 源码，并构建一次容器镜像）
 ./scripts/build-local.sh
 
-# 改完设备树后增量重编，跳过同步
-./scripts/build-local.sh --skip-sync
+# 改完设备树后增量重编，跳过同步；每 15 分钟保存一次 Docker checkpoint
+./scripts/build-local.sh --skip-sync --checkpoint-interval 15m
+
+# 如果编译失败，保留的容器和 /work 上的 out/、ccache 可直接续跑
+./scripts/build-local.sh --skip-sync --resume
 
 # 进容器手动调试
 ./scripts/build-local.sh --shell
@@ -68,9 +71,44 @@ cd Action-LineageOS-Builder
 --native           不用 docker，直接在宿主机编译（需自备 JDK8 + python2）
 --skip-sync        跳过 repo sync
 --shell            进入容器 shell 而不是编译
+--resume           继续上一次保留的容器；没有容器时使用 checkpoint 镜像
+--checkpoint-interval DURATION
+                   定时 docker commit，默认 15m；例如 10m、30m
+--checkpoint-image IMAGE
+                   checkpoint 镜像标签，默认 lineageos-15.1-builder:checkpoint
+--container-name NAME
+                   容器名，默认 lineageos-15.1-build
+--no-checkpoint    关闭定时 docker commit（仍保留容器和 /work 状态）
 ```
 
 产物：`build-local/workspace/out/target/product/alice/lineage-15.1-*.zip`
+
+### 断点与磁盘位置
+
+`build-local.sh` 不再使用 `--rm`：编译容器会保留，失败后可用 `--resume` 重新
+执行原命令。驱动器在后台读取 `checkpoints/current-stage`，并按间隔执行：
+
+```text
+docker commit --no-pause lineageos-15.1-build lineageos-15.1-builder:checkpoint
+```
+
+阶段和提交记录写在 `build-local/checkpoints/`。需要注意 Docker commit **不会
+包含 bind mount 的内容**；这是有意的：源码、`out/`、ccache 和 checkpoint 日志
+都位于 `--workdir`（在华为云主机上应为 `/work/...`），本来就会跨容器保留，且不
+会被复制进系统盘上的镜像层。checkpoint 镜像只保存容器自身的可写层和环境状态。
+
+失败后查看状态并续跑：
+
+```bash
+cat /work/lineage-build/checkpoints/current-stage
+tail -n 20 /work/lineage-build/checkpoints/history.log
+tail -n 20 /work/lineage-build/checkpoints/commits.log
+./scripts/build-local.sh --workdir /work/lineage-build --skip-sync --resume \
+    --jobs 16 --ccache-size 32G
+```
+
+脚本不会自动删除旧容器或 checkpoint 镜像；确认不再需要后再手动执行
+`docker rm lineageos-15.1-build` 和 `docker image rm lineageos-15.1-builder:checkpoint`。
 
 ---
 
@@ -88,13 +126,13 @@ cd Action-LineageOS-Builder
 
 同步与打补丁**完全复用 CI 的脚本**，所以两条路线产出的树是一致的。
 只有「编译」这一步分成两份：CI 版
-（`build-in-container.sh`，带超时与续跑）和本地版（`build-inner.sh`，不带）。
+（`build-in-container.sh`，带超时与续跑）和本地版（`build-inner.sh`，只负责编译）。
 
 ### 为什么编译步骤要分两份
 
 CI 版里的 `timeout 290m` + 退出码 75 + ccache 保存，**纯粹是为了对付 6 小时
-上限和临时 runner**。本地没有这两个问题，硬塞进去只会让失败诊断变复杂 ——
-本地编译中断就是真的出错了，不该被当成「时间到了，重跑吧」。
+上限和临时 runner**。本地驱动器通过保留容器、bind mount 和定时 Docker
+checkpoint 实现断点续跑，而 `build-inner.sh` 仍只负责一次 envsetup/lunch/make 流程。
 
 ---
 

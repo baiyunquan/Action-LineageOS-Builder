@@ -231,8 +231,8 @@ if [[ -n "${config_payload}" ]]; then
     chmod 0640 /etc/mihomo/config.yaml
     MIHOMO_CONFIG_PRESENT=1
 elif [[ -f /etc/mihomo/config.yaml ]] && \
-     sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' /etc/mihomo/config.yaml \
-        | grep -q .; then
+     [[ -n "$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' \
+        /etc/mihomo/config.yaml)" ]]; then
     echo "   使用已有的 /etc/mihomo/config.yaml。"
     MIHOMO_CONFIG_PRESENT=1
 else
@@ -393,5 +393,5 @@ echo "  sudo -iu ${TARGET_USER}"
 echo "  codex login --device-auth"
 echo "  ~/start-lineage-build.sh"
 echo
-echo "如需断点续编，可使用：~/start-lineage-build.sh --skip-sync"
+echo "如需断点续编，可使用：~/start-lineage-build.sh --skip-sync --resume"
 echo "======================================================================="

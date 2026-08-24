@@ -4,10 +4,10 @@
 # and the build dependencies are present -- either inside the
 # lineageos-15.1-builder image, or on a host old enough to build AOSP 8.1.
 #
-# This is the LOCAL counterpart to build-in-container.sh. It deliberately has no
-# timeout and no resume handling: those exist only because GitHub Actions kills
-# jobs at 6h and throws the machine away afterwards. Locally out/ persists, so a
-# re-run is a genuine incremental build.
+# This is the LOCAL counterpart to build-in-container.sh. The host driver keeps
+# the container and periodically commits its writable layer. The source tree,
+# out/ and ccache are bind mounts, so they remain the real incremental state and
+# are available even when the container itself has to be recreated.
 
 set -uo pipefail
 
@@ -16,6 +16,17 @@ LUNCH_TARGET="${LUNCH_TARGET:-lineage_alice-userdebug}"
 JOBS="${JOBS:-$(nproc)}"
 CCACHE_SIZE="${CCACHE_SIZE:-50G}"
 BUILD_TARGET="${BUILD_TARGET:-bacon}"
+CHECKPOINT_DIR="${CHECKPOINT_DIR:-${WORKDIR}/../checkpoints}"
+
+checkpoint_stage() {
+    local stage="$1"
+    mkdir -p "${CHECKPOINT_DIR}"
+    printf '%s\n' "${stage}" > "${CHECKPOINT_DIR}/current-stage"
+    printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${stage}" \
+        >> "${CHECKPOINT_DIR}/history.log"
+}
+
+checkpoint_stage "container-start"
 
 cd "${WORKDIR}"
 
@@ -48,8 +59,10 @@ if [ "${TARGET_PRODUCT:-}" != "lineage_alice" ]; then
     exit 1
 fi
 echo "   TARGET_PRODUCT=${TARGET_PRODUCT} TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT:-?}"
+checkpoint_stage "after-lunch"
 
 echo "==> make -j${JOBS} ${BUILD_TARGET}"
+checkpoint_stage "make-start"
 # make, not mka: mka is a shell function from envsetup.sh. It works in an
 # interactive shell but not when something needs to exec it as a command, and
 # using make everywhere keeps the local and CI paths identical. lunch has
@@ -63,10 +76,12 @@ if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
 fi
 
 if [ "${rc}" -ne 0 ]; then
+    checkpoint_stage "build-failed-${rc}"
     echo "!! build failed with exit ${rc}" >&2
     exit "${rc}"
 fi
 
+checkpoint_stage "build-finished"
 echo "==> Build finished"
 ls -lh out/target/product/alice/lineage-15.1-*.zip \
        out/target/product/alice/boot.img \
