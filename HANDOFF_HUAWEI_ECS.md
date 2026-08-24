@@ -150,6 +150,11 @@ sudo -iu <构建用户>
 codex login
 ```
 
+ECS 上的 Codex 配置位于 `/home/ubuntu/.codex/config.toml`，已默认使用
+`danger-full-access`、`approval_policy = "never"`、代理登录环境和
+`/home/ubuntu/Action-LineageOS-Builder` trusted 项目。对应模板见
+[`ECS_CODEX_CONFIG.toml`](ECS_CODEX_CONFIG.toml)。
+
 源码已经传输完成时，不要再执行 `repo sync`：
 
 ```bash
