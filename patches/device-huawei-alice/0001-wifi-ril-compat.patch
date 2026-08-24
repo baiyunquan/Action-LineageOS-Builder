@@ -1,0 +1,78 @@
+diff --git a/device.mk b/device.mk
+index 86fc131..2f6d3a0 100755
+--- a/device.mk
++++ b/device.mk
+@@ -212,7 +212,8 @@ PRODUCT_PACKAGES += \
+ 
+ # Wi-Fi
+ PRODUCT_PACKAGES += \
+-    android.hardware.wifi@1.0-service
++    android.hardware.wifi@1.0-service \
++    android.hidl.base@1.0
+ 
+ # NFC packages
+ PRODUCT_PACKAGES += \
+diff --git a/init/init_alice.cpp b/init/init_alice.cpp
+index 2e1d951..9418d63 100755
+--- a/init/init_alice.cpp
++++ b/init/init_alice.cpp
+@@ -2777,6 +2777,9 @@ void vendor_load_properties() {
+     }
+     else if (strcmp(modem.c_str(), "0X3DF58900") == 0) {
+         property_override("ro.config.hw_dsda", "false");
++        property_override("ro.config.modem_number", "2");
++        property_override("ro.config.client_number", "2");
++        property_override("ro.config.hisi_cdma_supported", "false");
+         property_override("ro.config.dsds_mode", "umts_gsm");
+         property_override("ro.multi.rild", "true");
+         property_override("rild.libpath1", "/vendor/lib64/libbalong-ril.so");
+@@ -2791,6 +2794,9 @@ void vendor_load_properties() {
+     }
+     else if (strcmp(modem.c_str(), "0X3DF58902") == 0) {
+         property_override("ro.config.hw_dsda", "false");
++        property_override("ro.config.modem_number", "2");
++        property_override("ro.config.client_number", "2");
++        property_override("ro.config.hisi_cdma_supported", "false");
+         property_override("ro.config.dsds_mode", "umts_gsm");
+         property_override("ro.multi.rild", "true");
+         property_override("rild.libpath1", "/vendor/lib64/libbalong-ril.so");
+diff --git a/libshim/Android.mk b/libshim/Android.mk
+index 015a99a..66449ea 100755
+--- a/libshim/Android.mk
++++ b/libshim/Android.mk
+@@ -41,6 +41,19 @@ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE_CLASS := SHARED_LIBRARIES
+ include $(BUILD_SHARED_LIBRARY)
+ 
++# Huawei's Wi-Fi HIDL blobs were linked against the standalone
++# android.hidl.base@1.0.so SONAME. Android 8.1 exports the implementation
++# from libhidltransport instead, so provide the expected SONAME as a small
++# compatibility library. The vendor blob already links libhidltransport and
++# resolves the HIDL Base symbols from it.
++include $(CLEAR_VARS)
++LOCAL_SRC_FILES := hidl_base_compat.cpp
++LOCAL_MODULE := android.hidl.base@1.0
++LOCAL_MULTILIB := 64
++LOCAL_MODULE_TAGS := optional
++LOCAL_MODULE_CLASS := SHARED_LIBRARIES
++include $(BUILD_SHARED_LIBRARY)
++
+ include $(CLEAR_VARS)
+ LOCAL_SRC_FILES := \
+     gui/SensorManager.cpp \
+diff --git a/libshim/hidl_base_compat.cpp b/libshim/hidl_base_compat.cpp
+new file mode 100644
+index 0000000..aaa3173
+--- /dev/null
++++ b/libshim/hidl_base_compat.cpp
+@@ -0,0 +1,10 @@
++/*
++ * Compatibility SONAME for the Huawei Wi-Fi HIDL implementation.
++ *
++ * Android 8.1 provides android.hidl.base@1.0 through libhidltransport. The
++ * vendor Wi-Fi library still declares a separate android.hidl.base@1.0.so
++ * dependency, so this intentionally small shared library satisfies that
++ * dependency while the real symbols come from the already-required
++ * libhidltransport.so.
++ */
++extern "C" void android_hidl_base_compat_anchor() {}

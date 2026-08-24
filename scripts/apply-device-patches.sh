@@ -13,8 +13,44 @@ set -euo pipefail
 
 DEVICE_TREE="${1:-device/huawei/alice}"
 BOARD_CONFIG="${DEVICE_TREE}/BoardConfig.mk"
+ROOTDIR="$(cd "${DEVICE_TREE}/../../.." && pwd)"
+PATCHDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../patches" && pwd)"
 
 [ -f "${BOARD_CONFIG}" ] || { echo "!! ${BOARD_CONFIG} not found" >&2; exit 1; }
+
+# Apply source-level fixes that cannot be expressed as BoardConfig values.
+# These are kept as patches in the builder repository so a fresh repo sync and
+# a resumed local build produce the same device/vendor trees.
+apply_source_patch() {
+    local repo="$1" patch_file="$2" name repo_dir
+    name="$(basename "${patch_file}")"
+    repo_dir="${ROOTDIR}/${repo}"
+
+    [ -d "${repo_dir}" ] || { echo "!! source repo missing: ${repo_dir}" >&2; return 1; }
+    [ -f "${patch_file}" ] || { echo "!! source patch missing: ${patch_file}" >&2; return 1; }
+
+    if git -c "safe.directory=${repo_dir}" -C "${repo_dir}" \
+            apply -R --check -p1 "${patch_file}" 2>/dev/null; then
+        echo "   skip ${repo}: ${name} (already applied)"
+        return 0
+    fi
+
+    if git -c "safe.directory=${repo_dir}" -C "${repo_dir}" \
+            apply --check -p1 "${patch_file}" 2>/dev/null; then
+        git -c "safe.directory=${repo_dir}" -C "${repo_dir}" \
+            apply -p1 "${patch_file}"
+        echo "   ok   ${repo}: ${name}"
+        return 0
+    fi
+
+    echo "!! cannot apply ${repo}: ${name}" >&2
+    return 1
+}
+
+apply_source_patch device/huawei/alice \
+    "${PATCHDIR}/device-huawei-alice/0001-wifi-ril-compat.patch"
+apply_source_patch vendor/huawei/alice \
+    "${PATCHDIR}/vendor-huawei-alice/0001-hi1101-b302-firmware.patch"
 
 # Replace the whole assignment line, or append if the key is absent.
 set_mk_var() {
@@ -32,9 +68,9 @@ echo "==> Patching ${BOARD_CONFIG} for CAM-TL00"
 # 1) OTA assert.
 #    The alice-based TWRP reports ro.product.device=hi6210sft, which is what let
 #    the verified LineageOS 14.1 package install on this phone. The CAM strings
-#    are added so a CAM-specific recovery would also pass.
+#    are added so CAM-specific and CHC-U03 recoveries also pass.
 set_mk_var "${BOARD_CONFIG}" TARGET_OTA_ASSERT_DEVICE \
-    "hi6210sft,alice,cam,carmel,CAM-TL00,HWCAM-H"
+    "hi6210sft,alice,cam,carmel,CAM-TL00,HWCAM-H,CHC-U03"
 
 # 2) userdata size.
 #    CAM-TL00 mmcblk0p40 = 11204608 KiB = 11473518592 bytes.
@@ -58,7 +94,7 @@ check() {
         fail=1
     fi
 }
-check TARGET_OTA_ASSERT_DEVICE           "hi6210sft,alice,cam,carmel,CAM-TL00,HWCAM-H"
+check TARGET_OTA_ASSERT_DEVICE           "hi6210sft,alice,cam,carmel,CAM-TL00,HWCAM-H,CHC-U03"
 check BOARD_USERDATAIMAGE_PARTITION_SIZE "11473518592"
 check WITH_DEXPREOPT                     "false"
 

@@ -17,7 +17,7 @@ A boot image with the wrong load addresses produces a black screen with no
 recovery path other than reflashing the stock backup, so these are hard errors.
 
 Usage:
-    verify-rom.py --product-out out/target/product/alice [--zip <rom.zip>]
+    verify-rom.py --product-out out/target/product/alice [--target-files <target_files.zip>] [--zip <rom.zip>]
 """
 import argparse
 import os
@@ -118,6 +118,10 @@ def check_boot(path, args):
 def check_system(path, args):
     print("\n== system.img: %s" % path)
     size = os.path.getsize(path)
+    check_system_size(size, args)
+
+
+def check_system_size(size, args):
     if size > args.system_max:
         fail("system.img is %d bytes, exceeds mmcblk0p38 (%d) -- flashing will fail"
              % (size, args.system_max))
@@ -126,6 +130,20 @@ def check_system(path, args):
         ok("size %d <= %d (%.1f%% of partition)" % (size, args.system_max, pct))
         if pct > 95.0:
             warn("system.img is at %.1f%% of the partition -- very little slack" % pct)
+
+
+def check_target_files_system(path, args):
+    print("\n== system.img in target-files: %s" % path)
+    try:
+        with zipfile.ZipFile(path) as zf:
+            info = zf.getinfo("IMAGES/system.img")
+    except (KeyError, zipfile.BadZipFile) as exc:
+        fail("%s: IMAGES/system.img unavailable (%s)" % (path, exc))
+        return
+
+    # Read only the ZIP central directory. The 1.2 GB image remains inside
+    # /work and is not extracted to the system disk just for this size check.
+    check_system_size(info.file_size, args)
 
 
 def check_zip(path):
@@ -145,7 +163,7 @@ def check_zip(path):
     else:
         fail("updater-script does not accept hi6210sft -- TWRP will refuse to install")
 
-    for extra in ("CAM-TL00", "HWCAM-H"):
+    for extra in ("CAM-TL00", "HWCAM-H", "CHC-U03"):
         if extra in text:
             ok("updater-script also accepts %s" % extra)
         else:
@@ -155,6 +173,7 @@ def check_zip(path):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--product-out", default="out/target/product/alice")
+    p.add_argument("--target-files")
     p.add_argument("--zip")
     p.add_argument("--kernel-addr", type=lambda v: int(v, 0), default=DEFAULTS["kernel_addr"])
     p.add_argument("--ramdisk-addr", type=lambda v: int(v, 0), default=DEFAULTS["ramdisk_addr"])
@@ -176,6 +195,10 @@ def main():
 
     if os.path.exists(system):
         check_system(system, args)
+    elif args.target_files and os.path.exists(args.target_files):
+        check_target_files_system(args.target_files, args)
+    elif args.target_files:
+        fail("%s not found" % args.target_files)
     else:
         fail("%s not found" % system)
 

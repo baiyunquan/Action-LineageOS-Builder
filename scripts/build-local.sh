@@ -111,6 +111,17 @@ if [ "${MODE}" = docker ]; then
     docker info >/dev/null 2>&1 || {
         echo "!! cannot talk to the docker daemon (is your user in the docker group?)" >&2
         exit 1; }
+
+    # mihomo listens on the host loopback. Use the host network namespace so
+    # 127.0.0.1:7890 inside the build container resolves to that proxy rather
+    # than to the container itself. Pass both proxy spellings because apt,
+    # curl, git, and other tools do not all consult the same one.
+    proxy_env=()
+    for proxy_name in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
+        http_proxy https_proxy all_proxy no_proxy; do
+        proxy_value="${!proxy_name:-}"
+        [ -n "${proxy_value}" ] && proxy_env+=( -e "${proxy_name}=${proxy_value}" )
+    done
 fi
 
 if ! command -v repo >/dev/null; then
@@ -149,7 +160,110 @@ if [ "${MODE}" = native ]; then
 else
     if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
         echo "==> Building ${IMAGE} (one time, a few minutes)"
-        docker build -t "${IMAGE}" "${REPODIR}/docker"
+        docker_build_args=()
+        for proxy_name in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
+            http_proxy https_proxy all_proxy no_proxy; do
+            proxy_value="${!proxy_name:-}"
+            [ -n "${proxy_value}" ] && \
+                docker_build_args+=( --build-arg "${proxy_name}=${proxy_value}" )
+        done
+        docker build --network host "${docker_build_args[@]}" \
+            -t "${IMAGE}" "${REPODIR}/docker"
+    fi
+
+    # Docker 29 renamed the old --pause=false spelling to --no-pause.
+    commit_help="$(docker commit --help 2>&1 || true)"
+    if [[ "${commit_help}" == *'--no-pause'* ]]; then
+        docker_commit_no_pause=(--no-pause)
+    else
+        docker_commit_no_pause=(--pause=false)
+    fi
+
+    checkpoint_pid=''
+    checkpoint_active=0
+
+    checkpoint_commit() {
+        [ "${CHECKPOINT_ENABLE}" -eq 1 ] || return 0
+        docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1 || return 0
+
+        local stage='unknown'
+        local timestamp
+        if [ -r "${CHECKPOINT_DIR}/current-stage" ]; then
+            stage="$(head -n 1 "${CHECKPOINT_DIR}/current-stage")"
+        fi
+        # Stage text is written into a Docker LABEL; keep it bounded and safe.
+        stage="${stage//[^[:alnum:]_.-]/_}"
+        stage="${stage:0:64}"
+        timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+        echo "==> Committing Docker checkpoint (${stage}) as ${CHECKPOINT_IMAGE}"
+        if docker commit "${docker_commit_no_pause[@]}" \
+            --change "LABEL com.liaic.lineage.checkpoint=${stage}" \
+            "${CONTAINER_NAME}" "${CHECKPOINT_IMAGE}" >/dev/null; then
+            printf '%s\t%s\t%s\n' "${timestamp}" "${stage}" "${CHECKPOINT_IMAGE}" \
+                >> "${CHECKPOINT_DIR}/commits.log"
+        else
+            echo "!! Docker checkpoint commit failed; bind-mounted build state is still on disk" >&2
+            return 1
+        fi
+    }
+
+    checkpoint_loop() {
+        while :; do
+            sleep "${CHECKPOINT_INTERVAL}" || return 0
+            local running
+            running="$(docker inspect --format '{{.State.Running}}' \
+                "${CONTAINER_NAME}" 2>/dev/null || true)"
+            [ "${running}" = true ] || return 0
+            checkpoint_commit || true
+        done
+    }
+
+    start_checkpoint_monitor() {
+        [ "${CHECKPOINT_ENABLE}" -eq 1 ] || return 0
+        checkpoint_loop &
+        checkpoint_pid=$!
+    }
+
+    stop_checkpoint_monitor() {
+        [ -n "${checkpoint_pid}" ] || return 0
+        kill "${checkpoint_pid}" 2>/dev/null || true
+        wait "${checkpoint_pid}" 2>/dev/null || true
+        checkpoint_pid=''
+    }
+
+    checkpoint_cleanup() {
+        stop_checkpoint_monitor
+        if [ "${checkpoint_active}" -eq 1 ]; then
+            checkpoint_commit || true
+            checkpoint_active=0
+        fi
+    }
+
+    trap checkpoint_cleanup EXIT
+
+    container_exists=0
+    container_running=false
+    if docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+        container_exists=1
+        container_running="$(docker inspect --format '{{.State.Running}}' \
+            "${CONTAINER_NAME}")"
+    fi
+    if [ "${container_exists}" -eq 1 ] && [ "${RESUME}" -ne 1 ]; then
+        echo "!! container ${CONTAINER_NAME} already exists; use --resume or remove it explicitly" >&2
+        exit 2
+    fi
+    if [ "${container_running}" = true ]; then
+        echo "!! container ${CONTAINER_NAME} is already running; stop/inspect it before resuming" >&2
+        exit 2
+    fi
+
+    run_image="${IMAGE}"
+    if [ "${RESUME}" -eq 1 ] && [ "${container_exists}" -eq 0 ] \
+        && [ "${CHECKPOINT_ENABLE}" -eq 1 ] \
+        && docker image inspect "${CHECKPOINT_IMAGE}" >/dev/null 2>&1; then
+        run_image="${CHECKPOINT_IMAGE}"
+        echo "==> Resuming from Docker image ${run_image}; mounted out/ and ccache remain on disk"
     fi
 
     # Docker 29 renamed the old --pause=false spelling to --no-pause.
@@ -252,6 +366,7 @@ else
     docker_args=(
         --name "${CONTAINER_NAME}"
         --label "com.liaic.lineage.build=15.1"
+        --network host
         -v "${BUILDROOT}:${BUILDROOT}"
         -v "${REPODIR}:${REPODIR}:ro"
         -u "$(id -u):$(id -g)"
@@ -265,6 +380,7 @@ else
         -e JOBS="${JOBS}"
         -w "${WORKDIR}"
     )
+    docker_args+=( "${proxy_env[@]}" )
     case "${CHECKPOINT_DIR}" in
         "${BUILDROOT}"/*) ;;
         *) docker_args+=( -v "${CHECKPOINT_DIR}:${CHECKPOINT_DIR}" ) ;;
@@ -313,9 +429,16 @@ fi
 
 echo "==> Verifying against CAM-TL00 geometry"
 zip="$(ls "${WORKDIR}"/out/target/product/alice/lineage-15.1-*.zip 2>/dev/null | head -1 || true)"
+target_files="$(find "${WORKDIR}/out/target/product/alice/obj/PACKAGING/target_files_intermediates" \
+    -maxdepth 1 -type f -name '*-target_files-*.zip' -printf '%T@ %p\n' 2>/dev/null \
+    | sort -n | tail -1 | cut -d' ' -f2- || true)"
 if [ -n "${zip}" ]; then
-    python3 "${SCRIPTDIR}/verify-rom.py" \
-        --product-out "${WORKDIR}/out/target/product/alice" --zip "${zip}"
+    verify_args=(
+        --product-out "${WORKDIR}/out/target/product/alice"
+        --zip "${zip}"
+    )
+    [ -n "${target_files}" ] && verify_args+=( --target-files "${target_files}" )
+    python3 "${SCRIPTDIR}/verify-rom.py" "${verify_args[@]}"
     echo
     echo "ROM: ${zip}"
     echo "Flash with the alice TWRP (it reports ro.product.device=hi6210sft)."
