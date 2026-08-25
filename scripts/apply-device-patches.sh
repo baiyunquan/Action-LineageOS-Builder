@@ -22,28 +22,36 @@ PATCHDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../patches" && pwd)"
 # These are kept as patches in the builder repository so a fresh repo sync and
 # a resumed local build produce the same device/vendor trees.
 apply_source_patch() {
-    local repo="$1" patch_file="$2" name repo_dir
+    local repo="$1" patch_file="$2" name repo_dir check_log
     name="$(basename "${patch_file}")"
     repo_dir="${ROOTDIR}/${repo}"
 
     [ -d "${repo_dir}" ] || { echo "!! source repo missing: ${repo_dir}" >&2; return 1; }
     [ -f "${patch_file}" ] || { echo "!! source patch missing: ${patch_file}" >&2; return 1; }
 
+    # Keep the failed check output.  The old implementation discarded it,
+    # leaving Actions with only "cannot apply" and making a binary blob
+    # mismatch indistinguishable from a wrong source revision.
+    check_log="$(mktemp)"
     if git -c "safe.directory=${repo_dir}" -C "${repo_dir}" \
-            apply -R --check -p1 "${patch_file}" 2>/dev/null; then
+            apply -R --check -p1 "${patch_file}" >"${check_log}" 2>&1; then
+        rm -f "${check_log}"
         echo "   skip ${repo}: ${name} (already applied)"
         return 0
     fi
 
     if git -c "safe.directory=${repo_dir}" -C "${repo_dir}" \
-            apply --check -p1 "${patch_file}" 2>/dev/null; then
+            apply --check -p1 "${patch_file}" >"${check_log}" 2>&1; then
         git -c "safe.directory=${repo_dir}" -C "${repo_dir}" \
             apply -p1 "${patch_file}"
+        rm -f "${check_log}"
         echo "   ok   ${repo}: ${name}"
         return 0
     fi
 
     echo "!! cannot apply ${repo}: ${name}" >&2
+    sed 's/^/        /' "${check_log}" >&2
+    rm -f "${check_log}"
     return 1
 }
 
@@ -53,8 +61,16 @@ apply_source_patch kernel/huawei/alice \
     "${PATCHDIR}/kernel-huawei-alice/0001-enable-tcpmss-for-hisi-tethering.patch"
 apply_source_patch vendor/huawei/alice \
     "${PATCHDIR}/vendor-huawei-alice/0001-hi1101-b302-firmware.patch"
-apply_source_patch vendor/huawei/alice \
-    "${PATCHDIR}/vendor-huawei-alice/0002-cam-stock-balong-ril.patch"
+
+# Do not apply 0002-cam-stock-balong-ril.patch.  Binary inspection shows that
+# its replacement is the Android 6/23 562,024-byte stock RIL (Build ID
+# 8b2334c081fa158d3618093ba656d9eb).  The pinned Android 8.1 vendor tree uses
+# the 904,496-byte Android 25 RIL (Build ID
+# 12178d97f65ab857783dab599d9272e3), and verify-vendor-blobs.py enforces its
+# SHA-256 in both collision paths.  Applying 0002 would therefore reintroduce
+# the old RIL and fail the provenance gate after a seemingly successful patch.
+# The patch remains recoverable from the previous Git commit, but is not part
+# of the build graph.
 
 # Replace the whole assignment line, or append if the key is absent.
 set_mk_var() {
