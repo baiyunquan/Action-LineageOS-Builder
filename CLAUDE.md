@@ -127,8 +127,10 @@ step an `if: always()`-style guard so it cannot skip the verify/upload steps.
   unset variables and would abort otherwise.
 - Git LFS must be hydrated inside the build container. The old CI failure left
   `external/chromium-webview/prebuilt/arm64/webview.apk` as a 134-byte LFS
-  pointer; `build-in-container.sh` now runs `git lfs pull` and refuses to build
-  while any pointer remains.
+  pointer. The manifest creates separate repositories for each WebView ABI, so
+  `build-in-container.sh` pulls those child repositories from their Gerrit LFS
+  endpoint, scans for remaining pointers, and verifies the arm64 APK is a real
+  ZIP before allowing compilation to start.
 - ccache defaults to 6G against a **10GB per-repo cache budget**. Raising it can
   evict the entry entirely and make re-runs slower, not faster.
 

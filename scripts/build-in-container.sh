@@ -118,19 +118,82 @@ cd "${WORKDIR}"
 # fail before compilation if any pointer remains.
 echo "==> Hydrating Git LFS prebuilts"
 git lfs install --system >/dev/null 2>&1 || true
-if [ -d external/chromium-webview ]; then
-    git -C external/chromium-webview lfs install --local >/dev/null 2>&1 || true
-    git -C external/chromium-webview lfs pull
+
+# The LineageOS manifest does not create one repository at
+# external/chromium-webview.  It creates separate repositories for patches and
+# each ABI under external/chromium-webview/prebuilt/*, so running `git lfs pull`
+# in the parent directory is a no-op.  Pull each manifest project explicitly;
+# the child projects' .lfsconfig files point at the LineageOS Gerrit LFS store,
+# which contains the large WebView objects that are not hosted by GitHub LFS.
+lfs_failed=0
+hydrate_lfs_repo() {
+    local repo="$1"
+    [ -d "${repo}" ] || return 0
+
+    echo "   LFS repo: ${repo}"
+    if ! git -C "${repo}" lfs install --local >/dev/null 2>&1; then
+        echo "!! git lfs install failed for ${repo}" >&2
+        lfs_failed=1
+        return 0
+    fi
+    if ! git -C "${repo}" lfs pull; then
+        echo "!! git lfs pull failed for ${repo}" >&2
+        lfs_failed=1
+        return 0
+    fi
+    if ! git -C "${repo}" lfs checkout; then
+        echo "!! git lfs checkout failed for ${repo}" >&2
+        lfs_failed=1
+    fi
+}
+
+for lfs_repo in \
+    external/chromium-webview/patches \
+    external/chromium-webview/prebuilt/arm \
+    external/chromium-webview/prebuilt/arm64 \
+    external/chromium-webview/prebuilt/x86 \
+    external/chromium-webview/prebuilt/x86_64; do
+    hydrate_lfs_repo "${lfs_repo}"
+done
+
+if [ "${lfs_failed}" -ne 0 ]; then
+    echo "!! one or more Git LFS projects could not be hydrated; refusing to build" >&2
+    exit 1
 fi
+
 pointer_count=0
 while IFS= read -r -d '' candidate; do
     if head -n1 "${candidate}" | grep -qx 'version https://git-lfs.github.com/spec/v1'; then
         echo "!! unresolved Git LFS pointer: ${candidate}" >&2
         pointer_count=$((pointer_count + 1))
     fi
-done < <(find . -type f -size -1k -print0)
+done < <(find . -type f -size -1024c -print0)
 if [ "${pointer_count}" -ne 0 ]; then
     echo "!! ${pointer_count} unresolved Git LFS pointer(s); refusing to build" >&2
+    exit 1
+fi
+
+# A pointer is only 134 bytes and is not a ZIP archive.  Validate the target
+# APK explicitly so a future Git LFS/filter regression fails here, before
+# Android's package signer reports the much less useful ZipException.
+webview_apk_count=0
+webview_apks=(external/chromium-webview/prebuilt/*/webview.apk)
+for webview_apk in "${webview_apks[@]}"; do
+    [ -f "${webview_apk}" ] || continue
+    webview_apk_count=$((webview_apk_count + 1))
+    webview_size="$(stat -c '%s' "${webview_apk}")"
+    if [ "${webview_size}" -lt 1048576 ]; then
+        echo "!! WebView APK is unexpectedly small (${webview_size} bytes): ${webview_apk}" >&2
+        exit 1
+    fi
+    if ! unzip -tq "${webview_apk}" >/dev/null 2>&1; then
+        echo "!! WebView APK is not a valid ZIP: ${webview_apk}" >&2
+        exit 1
+    fi
+    echo "   WebView APK verified: ${webview_apk} (${webview_size} bytes)"
+done
+if [ "${webview_apk_count}" -eq 0 ] || [ ! -f external/chromium-webview/prebuilt/arm64/webview.apk ]; then
+    echo "!! required arm64 WebView APK is missing" >&2
     exit 1
 fi
 
