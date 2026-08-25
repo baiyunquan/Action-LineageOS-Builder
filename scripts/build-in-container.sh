@@ -125,18 +125,31 @@ git lfs install --system >/dev/null 2>&1 || true
 # in the parent directory is a no-op.  Pull each manifest project explicitly;
 # the child projects' .lfsconfig files point at the LineageOS Gerrit LFS store,
 # which contains the large WebView objects that are not hosted by GitHub LFS.
+# Do not run `git lfs install --local` here: repo-managed projects use a .git
+# file that points into .repo, and the old bionic Git LFS package can fail while
+# trying to install a per-repository pre-push hook even though LFS downloads
+# themselves work. The system-level filters installed above are sufficient for
+# `lfs pull`; passing the endpoint explicitly also works with older Git LFS
+# versions that do not consistently honor .lfsconfig.
 lfs_failed=0
 hydrate_lfs_repo() {
     local repo="$1"
     [ -d "${repo}" ] || return 0
 
     echo "   LFS repo: ${repo}"
-    if ! git -C "${repo}" lfs install --local >/dev/null 2>&1; then
-        echo "!! git lfs install failed for ${repo}" >&2
+    if ! git -C "${repo}" lfs env >/dev/null 2>&1; then
+        echo "!! git lfs is not usable in ${repo}" >&2
         lfs_failed=1
         return 0
     fi
-    if ! git -C "${repo}" lfs pull; then
+    lfs_endpoint="$(git -C "${repo}" config --file=.lfsconfig --get lfs.url 2>/dev/null || true)"
+    if [ -n "${lfs_endpoint}" ]; then
+        echo "   LFS endpoint: ${lfs_endpoint}"
+        lfs_pull=(git -C "${repo}" -c "lfs.url=${lfs_endpoint}" lfs pull)
+    else
+        lfs_pull=(git -C "${repo}" lfs pull)
+    fi
+    if ! "${lfs_pull[@]}"; then
         echo "!! git lfs pull failed for ${repo}" >&2
         lfs_failed=1
         return 0

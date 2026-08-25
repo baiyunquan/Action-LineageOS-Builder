@@ -129,8 +129,9 @@ step an `if: always()`-style guard so it cannot skip the verify/upload steps.
   `external/chromium-webview/prebuilt/arm64/webview.apk` as a 134-byte LFS
   pointer. The manifest creates separate repositories for each WebView ABI, so
   `build-in-container.sh` pulls those child repositories from their Gerrit LFS
-  endpoint, scans for remaining pointers, and verifies the arm64 APK is a real
-  ZIP before allowing compilation to start.
+  endpoint without installing repo-local hooks (the old bionic LFS package can
+  fail on repo-managed `.git` files), scans for remaining pointers, and verifies
+  the arm64 APK is a real ZIP before allowing compilation to start.
 - The GitHub runner's root filesystem is intentionally filled by
   `maximize-build-space`; `actions/cache` otherwise stages its archive under
   the nearly-full root volume and fails with `zstd: ... No space left on
