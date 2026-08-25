@@ -4,8 +4,8 @@ name: LineageOS 15.1 (CAM-TL00 / hi6210sft)
 # Huawei CAM-TL00 (Honor 5A). See README.md for the hardware audit behind this.
 #
 # The free runner has a hard 6h job ceiling and a full 15.1 build on 4 cores does
-# not fit in one pass. The build is therefore RESUMABLE: it stops itself before
-# the ceiling, saves ccache, and continues on the next run. Expect 2-3 runs.
+# not fit in one pass. ccache is optional because the cache directory can consume
+# the disk needed by the final system image.
 
 on:
   workflow_dispatch:
@@ -22,6 +22,10 @@ on:
         description: 'ccache size (repo cache budget is 10GB total)'
         required: true
         default: '6G'
+      disable_ccache:
+        description: 'Disable ccache and do not allocate a cache directory'
+        type: boolean
+        default: true
       clean_ccache:
         description: 'Start from a cold ccache'
         type: boolean
@@ -37,7 +41,7 @@ jobs:
     steps:
       # Must run before anything fills the disk. Combines the free space on /
       # and /mnt into one LVM volume -- roughly 85GB, against a need of about
-      # 25GB source + 40GB out + 6GB ccache.
+      # 25GB source + 40GB out; ccache is disabled by default.
       - name: Maximise build space
         uses: easimon/maximize-build-space@master
         with:
@@ -69,7 +73,7 @@ jobs:
       # Restored before the build, saved after it even on timeout -- this is what
       # carries progress between runs.
       - name: Restore ccache
-        if: ${{ !inputs.clean_ccache }}
+        if: ${{ !inputs.disable_ccache && !inputs.clean_ccache }}
         uses: actions/cache/restore@v4
         with:
           path: /work/ccache
@@ -95,6 +99,7 @@ jobs:
             -v /work:/work \
             -v "${{ github.workspace }}:/repo" \
             -e WORKDIR=/work/workspace \
+            -e DISABLE_CCACHE='${{ inputs.disable_ccache }}' \
             -e CCACHE_DIR=/work/ccache \
             -e CCACHE_SIZE='${{ inputs.ccache_size }}' \
             -e BUILD_TIMEOUT='${{ inputs.build_timeout }}' \
@@ -110,9 +115,11 @@ jobs:
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" /work || true
 
-      # always(), so a run that ran out of time still banks its compiled objects.
+      # always(), so a run that ran out of time still banks its compiled objects
+      # when ccache mode is enabled. The default no-cache mode skips this step
+      # entirely and leaves no GitHub cache entry or /work/ccache directory.
       - name: Save ccache
-        if: always()
+        if: ${{ always() && !inputs.disable_ccache }}
         uses: actions/cache/save@v4
         with:
           path: /work/ccache
@@ -129,8 +136,13 @@ jobs:
             echo "### Build incomplete - re-run to continue"
             echo ""
             echo "Hit the internal \`${{ inputs.build_timeout }}\` limit before the ROM finished."
-            echo "ccache was saved. Re-run this workflow; a warm cache usually"
-            echo "finishes on the second or third attempt."
+            if [ '${{ inputs.disable_ccache }}' = 'true' ]; then
+              echo "ccache was disabled, so this run did not consume cache disk or quota."
+              echo "Re-run with a larger timeout or enable ccache for incremental runs."
+            else
+              echo "ccache was saved. Re-run this workflow; a warm cache usually"
+              echo "finishes on the second or third attempt."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail on a real build error

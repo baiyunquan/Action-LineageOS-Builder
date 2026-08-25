@@ -15,6 +15,7 @@ SCRIPTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPODIR="$(cd "${SCRIPTDIR}/.." && pwd)"
 MANIFEST_BRANCH="${MANIFEST_BRANCH:-lineage-15.1}"
 JOBS="${JOBS:-$(nproc)}"
+VENDOR_COMMIT="de5127f6b2bec5e1b5fe655125b965ef8d82f3d6"
 
 mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
@@ -59,6 +60,17 @@ for d in device/huawei/alice vendor/huawei/alice kernel/huawei/alice alice_patch
 done
 [ "${missing}" -eq 0 ] || { echo "!! repo sync incomplete" >&2; exit 1; }
 
+# The vendor makefile copies proprietary/ wholesale into system/.  Verify the
+# pinned Android 8.1 source before applying any device patches, so a stale
+# stock extraction cannot survive until the end of a multi-hour compile.
+echo "==> Verifying pinned vendor blobs"
+vendor_commit="$(git -C vendor/huawei/alice rev-parse HEAD)"
+if [ "${vendor_commit}" != "${VENDOR_COMMIT}" ]; then
+    echo "!! vendor/huawei/alice is ${vendor_commit}, expected ${VENDOR_COMMIT}" >&2
+    exit 1
+fi
+echo "   vendor commit: ${vendor_commit}"
+
 # The kernel must be the 15.1 branch. The copy under ../references/ is cm-14.1
 # and would silently produce a Nougat-era kernel inside an 8.1 ROM.
 echo "==> Kernel branch check"
@@ -67,5 +79,10 @@ echo "   kernel 3.10.${kver}"
 
 bash "${SCRIPTDIR}/apply-device-patches.sh" device/huawei/alice
 bash "${SCRIPTDIR}/apply-alice-patcher.sh" "${WORKDIR}"
+
+# The device patcher applies the CAM-specific hi1101 B302 firmware update to
+# the pinned vendor checkout. Verify the post-patch source that will actually
+# feed PRODUCT_COPY_FILES, not merely the pristine git commit.
+python3 "${SCRIPTDIR}/verify-vendor-blobs.py" --source-root "${WORKDIR}"
 
 echo "==> Source tree ready at ${WORKDIR}"

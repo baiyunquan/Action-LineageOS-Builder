@@ -1,0 +1,22 @@
+# source path is relative to vendor/huawei/alice/proprietary.
+# image path is relative to the Android system image root.
+# These are the Android 8.1 hi6210sft blobs from the pinned vendor commit after
+# the reproducible CAM hi1101 B302 patch, not untracked Android 6 stock files.
+lib64/libbalong-ril.so	lib64/libbalong-ril.so	dcbb46ec581013a6f13c36dfa3cdb3c769211168e5614cc0cb7c0f321e01aaf4
+vendor/lib64/libbalong-ril.so	vendor/lib64/libbalong-ril.so	dcbb46ec581013a6f13c36dfa3cdb3c769211168e5614cc0cb7c0f321e01aaf4
+lib64/libbalong-ril-1.so	lib64/libbalong-ril-1.so	f075cf226fe2260e8538edcc13f254f3b7aef1273f5bc86e0d67fc9e44aae1aa
+vendor/lib64/libbalong-ril-1.so	vendor/lib64/libbalong-ril-1.so	f075cf226fe2260e8538edcc13f254f3b7aef1273f5bc86e0d67fc9e44aae1aa
+lib64/libbalong-ril-2.so	lib64/libbalong-ril-2.so	c9eccbb5995cd03c34f19410fa98082acd49ec6b80d45789eecda3dbd6ee7a42
+vendor/lib64/libbalong-ril-2.so	vendor/lib64/libbalong-ril-2.so	c9eccbb5995cd03c34f19410fa98082acd49ec6b80d45789eecda3dbd6ee7a42
+vendor/lib/libbt-vendor.so	vendor/lib/libbt-vendor.so	9939fab40abc1e79802fb9a9a9215ea6bb9738a20fa45a596479ae4a30e13538
+vendor/lib/libbt-vendor-hi110x.so	vendor/lib/libbt-vendor-hi110x.so	9939fab40abc1e79802fb9a9a9215ea6bb9738a20fa45a596479ae4a30e13538
+vendor/lib64/libbt-vendor.so	vendor/lib64/libbt-vendor.so	f1d170aa694b65c42dc935ae8f37f6741ad7792f85f1e4c7960e11b1129909f1
+vendor/lib64/libbt-vendor-hi110x.so	vendor/lib64/libbt-vendor-hi110x.so	f1d170aa694b65c42dc935ae8f37f6741ad7792f85f1e4c7960e11b1129909f1
+vendor/firmware/uart_cfg	vendor/firmware/uart_cfg	3fbe0affcf1465031becac36ae7e82e7b66d01461aa9cda62bc3fa132230b9dd
+vendor/firmware/UART_CMP.bin	vendor/firmware/UART_CMP.bin	391f9277a221a4cf2a03d44034e7b4dc897c614252ff19e689005930a78f8417
+vendor/firmware/UART_COD.bin	vendor/firmware/UART_COD.bin	ac352a5864cca85a619c6e87bc360f0507c7fc5b5fe1c5a8d9075d11c52fd4bf
+vendor/firmware/UART_RW.bin	vendor/firmware/UART_RW.bin	8ee7fccfa35732dcb771fae7598ec06cf777e612faa6c70abfcefa3ec45aab9a
+vendor/firmware/UART_TBL.bin	vendor/firmware/UART_TBL.bin	18f80c185b5edb0ce2b48362b4ad766df2e1da2aef90bee6ef0788ef0c748c3a
+vendor/firmware/SDIO_RW_CARMEL_TL00H_FEM.bin	vendor/firmware/SDIO_RW_CARMEL_TL00H_FEM.bin	58d76e196bf9259381f011b2fa137f0e267ee57938734a443ffe5b07cc34041f
+vendor/firmware/nvram_CHERRY_PLUS_TL00.txt	vendor/firmware/nvram_CHERRY_PLUS_TL00.txt	01956be3b2f08071930f8335ef4185c904904f2bf2120728d5481fe40b87163c
+vendor/firmware/GNSS.bin	vendor/firmware/GNSS.bin	72859849530b12b85b39cb61807680ed6705876fead4a227b27c0401aa8cc400

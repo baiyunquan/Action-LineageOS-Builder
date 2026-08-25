@@ -7,12 +7,14 @@
   SoC, the boot load addresses, and all 15 hardcoded mmcblk0pNN partition
   numbers used by rootdir/fstab.hi6210sft. See ../README.md for the full audit.
 
-  All four repos MUST be pinned to lineage-15.1. The copy of the kernel under
-  ../references/ is on cm-14.1 and is NOT usable for an 8.1 build.
+  The device/kernel/patcher repos follow lineage-15.1.  The vendor repo is
+  pinned to the exact Android 8.1 blob commit below; keeping it floating on a
+  branch previously allowed an Android 6 stock extraction to win collisions
+  with the generic RIL and hi110x Bluetooth libraries.
 -->
 <manifest>
   <project name="DarkJoker360/android_kernel_huawei_alice" path="kernel/huawei/alice" remote="github" revision="lineage-15.1"/>
   <project name="DarkJoker360/android_device_huawei_alice" path="device/huawei/alice" remote="github" revision="lineage-15.1"/>
-  <project name="DarkJoker360/android_vendor_huawei_alice" path="vendor/huawei/alice" remote="github" revision="lineage-15.1"/>
+  <project name="baiyunquan/android_vendor_huawei_alice" path="vendor/huawei/alice" remote="github" revision="de5127f6b2bec5e1b5fe655125b965ef8d82f3d6"/>
   <project name="DarkJoker360/alice_patcher"               path="alice_patcher"       remote="github" revision="lineage-15.1"/>
 </manifest>

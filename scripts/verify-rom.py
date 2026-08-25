@@ -22,6 +22,7 @@ Usage:
 import argparse
 import os
 import struct
+import subprocess
 import sys
 import zipfile
 
@@ -132,6 +133,18 @@ def check_system_size(size, args):
             warn("system.img is at %.1f%% of the partition -- very little slack" % pct)
 
 
+def check_vendor(path):
+    checker = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "verify-vendor-blobs.py")
+    if not os.path.isfile(checker):
+        fail("vendor hash checker missing: %s" % checker)
+        return
+    print("\n== vendor blobs in final system.img", flush=True)
+    result = subprocess.run([sys.executable, checker, "--system-image", path])
+    if result.returncode != 0:
+        fail("vendor blob provenance/hash check failed")
+
+
 def check_target_files_system(path, args):
     print("\n== system.img in target-files: %s" % path)
     try:
@@ -195,6 +208,7 @@ def main():
 
     if os.path.exists(system):
         check_system(system, args)
+        check_vendor(system)
     elif args.target_files and os.path.exists(args.target_files):
         check_target_files_system(args.target_files, args)
     elif args.target_files:

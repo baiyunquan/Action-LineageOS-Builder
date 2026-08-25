@@ -18,10 +18,10 @@ partition dumps. See `../CLAUDE.md` for the device background.
 1. **The free runner has a hard 6h job cap** and a 4-core LOS 15.1 build does
    not fit in one pass.
 2. **Runners are ephemeral.** `out/` and the source tree do *not* survive
-   between runs — only `ccache`, via `actions/cache`. So a re-run is a
-   *ccache-warm restart*, not a true incremental resume. Progress is monotonic
-   only in the sense that each run leaves more objects cached. Do not describe
-   it as "resuming where it left off" — that is not what happens.
+   between runs. The workflow's `disable_ccache` input defaults to `true`, so
+   the normal run also creates no ccache directory and uses no Actions cache.
+   If explicitly disabled, only then does `actions/cache` provide a
+   ccache-warm restart; it is still not a true incremental resume.
 3. **AOSP 8.1 will not build on a modern host.** ubuntu-22.04's gcc-11/12
    rejects 2017-era C++, and the runner has no python2 or openjdk-8. Hence the
    split: `repo` runs on the **host** (needs new python3), the compiler runs in

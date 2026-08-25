@@ -99,7 +99,7 @@ WITH_DEXPREOPT := false                              # 省时间，也省 system
 | 入口 | Actions → Run workflow | [`./scripts/build-local.sh`](scripts/build-local.sh) |
 | 单次时长 | **6 小时硬上限** | 无限制 |
 | `out/` 保留 | **否**（runner 用完即毁） | 是 |
-| 重跑语义 | ccache 预热后从头再来 | **真正的增量编译** |
+| 重跑语义 | 默认不使用 ccache（可在 Run workflow 中打开） | **真正的增量编译** |
 | 适合 | 只要一个产物 | **反复调设备树** |
 
 本地路线见 **[LOCAL_BUILD.md](LOCAL_BUILD.md)**。若要迭代设备树，强烈建议用本地 ——
@@ -113,18 +113,18 @@ CI 上每次重跑都要把 92680 个目标重新走一遍，本地改一行重�
 ### 关于 6 小时上限（重要）
 
 > ⚠ 补充说明：GitHub runner 是**临时的**，`out/` 与源码树在两次运行之间
-> **不会保留**，只有 ccache 经 `actions/cache` 持久化。所以「续跑」实际是
-> 「ccache 预热后重新开始」，而不是断点续编 —— 每次运行只是让更多目标文件
-> 进入缓存。若始终收敛不了，请改用本地路线。
+> **不会保留**。工作流的 `disable_ccache` 默认开启，因此不会创建
+> `/work/ccache`，也不会占用 GitHub Actions cache 配额。若关闭该参数，才会
+> 通过 `actions/cache` 持久化 ccache；重跑仍是缓存预热后重新开始，而不是断点续编。
+> 若始终收敛不了，请改用本地路线。
 
 免费 runner 单任务上限 6 小时，4 核全量编译 LineageOS 15.1 通常 5-10 小时，
-**第一次几乎一定跑不完**。因此本工作流设计成**可续跑**：
+**第一次可能跑不完**。需要节省硬盘时保持 `disable_ccache=true`；需要缩短重跑时间时再关闭该参数：
 
-1. 编译命令外包一层 `timeout 290m`，主动退出而不是被 Actions 强杀 ——
-   被强杀会跳过保存 ccache 的步骤，本次进度全部作废；
-2. ccache 用 `actions/cache` 持久化，`if: always()` 保证超时也会保存；
-3. 超时退出码 75，工作流不判定为失败，只在 Summary 提示「重新运行以继续」；
-4. 第 2～3 次运行 ccache 命中率高，通常能在时限内完成。
+1. 编译命令外包一层 `timeout 290m`，主动退出而不是被 Actions 强杀；
+2. `disable_ccache=true` 时不恢复、不保存、也不创建 ccache 目录；
+3. 关闭该参数时，ccache 用 `actions/cache` 持久化，`if: always()` 保证超时也会保存；
+4. 超时退出码 75，工作流不判定为失败，只在 Summary 提示下一步。
 
 **用法：触发后如果 Summary 显示 "Build incomplete"，直接再点一次 Run workflow。**
 
@@ -213,8 +213,8 @@ fastboot flash recovery partitions/recovery_raw.img
 3. **TWRP 3.1.0 对 Android 8.1 偏旧**，可能无法解密 8.1 的 `/data`。上级目录
    README 已记录过 FDE 格式化问题。若 recovery 挂不上 `/data`，需要升级到
    TWRP 3.2+，那是一轮独立的 recovery 构建工作，不在本方案内。
-4. **ccache 与仓库缓存额度**：GitHub 每仓库缓存总量 10GB，默认 `ccache_size=6G`
-   已留出余量；调大可能挤掉旧缓存反而拖慢续跑。
+4. **ccache 与仓库缓存额度**：工作流默认 `disable_ccache=true`，不会消耗仓库
+   缓存额度；只有明确关闭该参数时，`ccache_size` 才生效。
 
 ---
 

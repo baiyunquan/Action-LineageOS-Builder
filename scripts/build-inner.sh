@@ -6,17 +6,24 @@
 #
 # This is the LOCAL counterpart to build-in-container.sh. The host driver keeps
 # the container and periodically commits its writable layer. The source tree,
-# out/ and ccache are bind mounts, so they remain the real incremental state and
-# are available even when the container itself has to be recreated.
+# out/ and (when enabled) ccache are bind mounts, so they remain the real
+# incremental state and are available even when the container is recreated.
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${WORKDIR:?WORKDIR must be set}"
 LUNCH_TARGET="${LUNCH_TARGET:-lineage_alice-userdebug}"
 JOBS="${JOBS:-$(nproc)}"
 CCACHE_SIZE="${CCACHE_SIZE:-50G}"
+DISABLE_CCACHE="${DISABLE_CCACHE:-0}"
 BUILD_TARGET="${BUILD_TARGET:-bacon}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-${WORKDIR}/../checkpoints}"
+
+case "${DISABLE_CCACHE,,}" in
+    1|true|yes|on) DISABLE_CCACHE=1 ;;
+    *)             DISABLE_CCACHE=0 ;;
+esac
 
 checkpoint_stage() {
     local stage="$1"
@@ -30,12 +37,19 @@ checkpoint_stage "container-start"
 
 cd "${WORKDIR}"
 
-export USE_CCACHE=1
-export CCACHE_DIR="${CCACHE_DIR:-${WORKDIR}/../ccache}"
-export CCACHE_COMPRESS=1
-mkdir -p "${CCACHE_DIR}"
-if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
-    prebuilts/misc/linux-x86/ccache/ccache -M "${CCACHE_SIZE}" >/dev/null
+if [ "${DISABLE_CCACHE}" -eq 1 ]; then
+    # AOSP's make logic treats any non-empty USE_CCACHE as enabled on some
+    # 15.1 branches, so unset it instead of assigning a false-looking value.
+    unset USE_CCACHE CCACHE_DIR CCACHE_COMPRESS
+    echo "==> ccache disabled (DISABLE_CCACHE=${DISABLE_CCACHE})"
+else
+    export USE_CCACHE=1
+    export CCACHE_DIR="${CCACHE_DIR:-${WORKDIR}/../ccache}"
+    export CCACHE_COMPRESS=1
+    mkdir -p "${CCACHE_DIR}"
+    if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
+        prebuilts/misc/linux-x86/ccache/ccache -M "${CCACHE_SIZE}" >/dev/null
+    fi
 fi
 
 export LC_ALL=C
@@ -70,7 +84,7 @@ checkpoint_stage "make-start"
 make -j"${JOBS}" "${BUILD_TARGET}"
 rc=$?
 
-if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
+if [ "${DISABLE_CCACHE}" -eq 0 ] && [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
     echo "==> ccache"
     prebuilts/misc/linux-x86/ccache/ccache -s | sed 's/^/   /'
 fi
@@ -86,3 +100,8 @@ echo "==> Build finished"
 ls -lh out/target/product/alice/lineage-15.1-*.zip \
        out/target/product/alice/boot.img \
        out/target/product/alice/system.img 2>/dev/null || true
+
+echo "==> Verifying pinned vendor blobs in final system.img"
+python3 "${SCRIPT_DIR}/verify-vendor-blobs.py" \
+    --source-root "${WORKDIR}" \
+    --system-image "${WORKDIR}/out/target/product/alice/system.img"

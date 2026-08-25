@@ -9,11 +9,12 @@
 #
 # Exit codes:
 #   0  ROM built
-#   75 hit the internal time limit -- partial progress is in ccache, re-run
+#   75 hit the internal time limit -- partial progress is in ccache when enabled
 #   *  real build failure
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${WORKDIR:-/work/workspace}"
 CCACHE_DIR_HOST="${CCACHE_DIR:-/work/ccache}"
 LUNCH_TARGET="${LUNCH_TARGET:-lineage_alice-userdebug}"
@@ -22,6 +23,12 @@ JOBS="${JOBS:-$(nproc)}"
 # artifact upload steps still get to run.
 BUILD_TIMEOUT="${BUILD_TIMEOUT:-290m}"
 CCACHE_SIZE="${CCACHE_SIZE:-8G}"
+DISABLE_CCACHE="${DISABLE_CCACHE:-0}"
+
+case "${DISABLE_CCACHE,,}" in
+    1|true|yes|on) DISABLE_CCACHE=1 ;;
+    *)             DISABLE_CCACHE=0 ;;
+esac
 
 if [ "${SKIP_APT_INSTALL:-0}" = 1 ]; then
     echo "==> Using dependencies preinstalled in the CCI builder image"
@@ -77,8 +84,10 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 
 # Fail here rather than 40 minutes later inside the build. A missing python2 in
 # particular shows up as a confusing "roomservice.py: No such file or directory"
-# (the shebang interpreter is what is actually missing).
-for tool in java python python3 curl git git-lfs repo obsutil; do
+# (the shebang interpreter is what is actually missing). `repo` is only used by
+# the host-side sync step, and `obsutil` is only needed by the CCI entrypoint;
+# neither is required inside the GitHub compile container.
+for tool in java python python3 curl git git-lfs; do
     command -v "${tool}" >/dev/null || { echo "!! ${tool} not installed" >&2; exit 1; }
 done
 echo "   java:   $(java -version 2>&1 | head -1)"
@@ -110,14 +119,23 @@ if [ "${pointer_count}" -ne 0 ]; then
 fi
 
 # ccache is what makes a resumed run finish inside the time limit; a warm cache
-# typically takes the second or third run from ~6h down to well under two.
-export USE_CCACHE=1
-export CCACHE_DIR="${CCACHE_DIR_HOST}"
-export CCACHE_COMPRESS=1
-mkdir -p "${CCACHE_DIR}"
-if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
-    prebuilts/misc/linux-x86/ccache/ccache -M "${CCACHE_SIZE}" >/dev/null
-    prebuilts/misc/linux-x86/ccache/ccache -s | sed 's/^/   /'
+# typically takes the second or third run from ~6h down to well under two.  The
+# disable switch is deliberately handled before creating CCACHE_DIR, so a
+# no-cache run does not reserve or populate a large cache directory.
+if [ "${DISABLE_CCACHE}" -eq 1 ]; then
+    # AOSP's make logic treats any non-empty USE_CCACHE as enabled on some
+    # 15.1 branches, so unset it instead of assigning a false-looking value.
+    unset USE_CCACHE CCACHE_DIR CCACHE_COMPRESS
+    echo "==> ccache disabled (DISABLE_CCACHE=${DISABLE_CCACHE})"
+else
+    export USE_CCACHE=1
+    export CCACHE_DIR="${CCACHE_DIR_HOST}"
+    export CCACHE_COMPRESS=1
+    mkdir -p "${CCACHE_DIR}"
+    if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
+        prebuilts/misc/linux-x86/ccache/ccache -M "${CCACHE_SIZE}" >/dev/null
+        prebuilts/misc/linux-x86/ccache/ccache -s | sed 's/^/   /'
+    fi
 fi
 
 export LC_ALL=C
@@ -158,7 +176,7 @@ echo "==> Building (limit ${BUILD_TIMEOUT}, -j${JOBS})"
 timeout "${BUILD_TIMEOUT}" make -j"${JOBS}" bacon
 rc=$?
 
-if [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
+if [ "${DISABLE_CCACHE}" -eq 0 ] && [ -x prebuilts/misc/linux-x86/ccache/ccache ]; then
     echo "==> ccache after build"
     prebuilts/misc/linux-x86/ccache/ccache -s | sed 's/^/   /'
 fi
@@ -181,3 +199,8 @@ fi
 echo "==> Build finished"
 ls -lh out/target/product/alice/*.zip out/target/product/alice/boot.img \
        out/target/product/alice/system.img 2>/dev/null || true
+
+echo "==> Verifying pinned vendor blobs in final system.img"
+python3 "${SCRIPT_DIR}/verify-vendor-blobs.py" \
+    --source-root "${WORKDIR}" \
+    --system-image "${WORKDIR}/out/target/product/alice/system.img"

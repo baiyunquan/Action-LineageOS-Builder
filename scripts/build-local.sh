@@ -13,6 +13,7 @@
 #   ./scripts/build-local.sh --shell            drop into the build container
 #   ./scripts/build-local.sh --resume           reuse the last container/image checkpoint
 #   ./scripts/build-local.sh --checkpoint-interval 15m
+#   ./scripts/build-local.sh --disable-ccache    do not create/use a ccache directory
 #
 # NOTE: this script has not been run end to end. It is written from the four
 # failures the CI path hit (see LOCAL_BUILD.md), but the local path itself is
@@ -31,6 +32,7 @@ LUNCH_TARGET="${LUNCH_TARGET:-lineage_alice-userdebug}"
 BUILD_TARGET="${BUILD_TARGET:-bacon}"
 JOBS="${JOBS:-$(nproc)}"
 CCACHE_SIZE="${CCACHE_SIZE:-50G}"
+DISABLE_CCACHE="${DISABLE_CCACHE:-0}"
 CHECKPOINT_ENABLE="${CHECKPOINT_ENABLE:-1}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-15m}"
 CHECKPOINT_IMAGE="${CHECKPOINT_IMAGE:-}"
@@ -46,6 +48,7 @@ while [ $# -gt 0 ]; do
         --workdir)     BUILDROOT="$2"; WORKDIR="$2/workspace"; CCACHE_DIR="$2/ccache"; shift 2 ;;
         --jobs)        JOBS="$2"; shift 2 ;;
         --ccache-size) CCACHE_SIZE="$2"; shift 2 ;;
+        --disable-ccache) DISABLE_CCACHE=1; shift ;;
         --target)      BUILD_TARGET="$2"; shift 2 ;;
         --native)      MODE=native; shift ;;
         --skip-sync)   DO_SYNC=0; shift ;;
@@ -62,6 +65,11 @@ done
 
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-${BUILDROOT}/checkpoints}"
 CHECKPOINT_IMAGE="${CHECKPOINT_IMAGE:-${IMAGE}:checkpoint}"
+
+case "${DISABLE_CCACHE,,}" in
+    1|true|yes|on) DISABLE_CCACHE=1 ;;
+    *)             DISABLE_CCACHE=0 ;;
+esac
 
 if [ "${CHECKPOINT_ENABLE}" -eq 1 ] && [ -z "${CHECKPOINT_INTERVAL}" ]; then
     echo "!! --checkpoint-interval must not be empty" >&2
@@ -90,7 +98,11 @@ avail_kb="$(df -Pk "${BUILDROOT}" | awk 'NR==2 {print $4}')"
 avail_gb=$(( avail_kb / 1024 / 1024 ))
 echo "   disk free at ${BUILDROOT}: ${avail_gb} GB"
 if [ "${avail_gb}" -lt 300 ]; then
-    echo "   !! want >= 300 GB (source ~30, out ~60, ccache ${CCACHE_SIZE})" >&2
+    if [ "${DISABLE_CCACHE}" -eq 1 ]; then
+        echo "   !! want >= 300 GB (source ~30, out ~60, ccache disabled)" >&2
+    else
+        echo "   !! want >= 300 GB (source ~30, out ~60, ccache ${CCACHE_SIZE})" >&2
+    fi
     [ "${avail_gb}" -lt 150 ] && { echo "!! under 150 GB, refusing to start" >&2; exit 1; }
     echo "   continuing anyway, but the build may run out of space"
 fi
@@ -148,13 +160,14 @@ fi
 
 # -------------------------------------------------------------------- build --
 
-mkdir -p "${CCACHE_DIR}" "${BUILDROOT}/home"
+mkdir -p "${BUILDROOT}/home"
+[ "${DISABLE_CCACHE}" -eq 0 ] && mkdir -p "${CCACHE_DIR}"
 
 if [ "${MODE}" = native ]; then
     echo "==> Building natively (host must have openjdk-8 and python2)"
     [ "${DO_SHELL}" -eq 1 ] && exec bash
     WORKDIR="${WORKDIR}" LUNCH_TARGET="${LUNCH_TARGET}" JOBS="${JOBS}" \
-    CCACHE_DIR="${CCACHE_DIR}" CCACHE_SIZE="${CCACHE_SIZE}" \
+    DISABLE_CCACHE="${DISABLE_CCACHE}" CCACHE_DIR="${CCACHE_DIR}" CCACHE_SIZE="${CCACHE_SIZE}" \
     BUILD_TARGET="${BUILD_TARGET}" CHECKPOINT_DIR="${CHECKPOINT_DIR}" \
         bash "${SCRIPTDIR}/build-inner.sh"
 else
@@ -361,7 +374,8 @@ else
         echo "==> Resuming from Docker image ${run_image}; mounted out/ and ccache remain on disk"
     fi
 
-    # Run as the invoking user so out/ and ccache do not end up root-owned.
+    # Run as the invoking user so out/ and (when enabled) ccache do not end up
+    # root-owned.
     # HOME must be supplied explicitly because that uid has no passwd entry.
     docker_args=(
         --name "${CONTAINER_NAME}"
@@ -373,6 +387,7 @@ else
         -e HOME="${BUILDROOT}/home"
         -e WORKDIR="${WORKDIR}"
         -e CHECKPOINT_DIR="${CHECKPOINT_DIR}"
+        -e DISABLE_CCACHE="${DISABLE_CCACHE}"
         -e CCACHE_DIR="${CCACHE_DIR}"
         -e CCACHE_SIZE="${CCACHE_SIZE}"
         -e LUNCH_TARGET="${LUNCH_TARGET}"
