@@ -131,6 +131,11 @@ step an `if: always()`-style guard so it cannot skip the verify/upload steps.
   `build-in-container.sh` pulls those child repositories from their Gerrit LFS
   endpoint, scans for remaining pointers, and verifies the arm64 APK is a real
   ZIP before allowing compilation to start.
+- The GitHub runner's root filesystem is intentionally filled by
+  `maximize-build-space`; `actions/cache` otherwise stages its archive under
+  the nearly-full root volume and fails with `zstd: ... No space left on
+  device`. The workflow creates `/work/runner-temp` and passes it as
+  `RUNNER_TEMP`/`TMPDIR` to every cache restore/save step.
 - ccache defaults to 6G against a **10GB per-repo cache budget**. Raising it can
   evict the entry entirely and make re-runs slower, not faster.
 

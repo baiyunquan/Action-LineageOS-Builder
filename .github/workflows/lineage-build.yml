@@ -61,6 +61,18 @@ jobs:
       - name: Take ownership of /work
         run: sudo chown -R "$(id -u):$(id -g)" /work
 
+      # actions/cache creates its compressed archive under RUNNER_TEMP before
+      # uploading it.  The space-maximising action deliberately fills the
+      # runner's root filesystem and mounts the usable space at /work, so the
+      # default temp directory has almost no free space left.  Keep cache
+      # staging on the large /work volume instead (this applies to both the
+      # source and optional ccache archives).
+      - name: Prepare cache staging on build volume
+        run: |
+          sudo mkdir -p /work/runner-temp
+          sudo chown "$(id -u):$(id -g)" /work/runner-temp
+          df -h / /work /work/runner-temp
+
       - name: Check out builder scripts
         uses: actions/checkout@v4
 
@@ -79,6 +91,9 @@ jobs:
       - name: Restore ccache
         if: ${{ !inputs.disable_ccache && !inputs.clean_ccache }}
         uses: actions/cache/restore@v4
+        env:
+          RUNNER_TEMP: /work/runner-temp
+          TMPDIR: /work/runner-temp
         with:
           path: /work/ccache
           key: ccache-alice-${{ github.run_id }}
@@ -92,6 +107,9 @@ jobs:
       - name: Restore synced source cache
         id: source_cache
         uses: actions/cache/restore@v4
+        env:
+          RUNNER_TEMP: /work/runner-temp
+          TMPDIR: /work/runner-temp
         with:
           path: /work/workspace/.repo
           key: lineage-source-${{ runner.os }}-${{ hashFiles('local_manifests/alice.xml', 'scripts/sync-source.sh') }}
@@ -112,7 +130,21 @@ jobs:
       - name: Save synced source cache
         if: ${{ steps.sync_source.outcome == 'success' && steps.source_cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
+        env:
+          RUNNER_TEMP: /work/runner-temp
+          TMPDIR: /work/runner-temp
+        run: |
+          echo "==> Source cache size"
+          du -sh /work/workspace/.repo
+          df -h / /work /work/runner-temp
+        shell: bash
+      - name: Upload synced source cache
+        if: ${{ steps.sync_source.outcome == 'success' && steps.source_cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
         uses: actions/cache/save@v4
+        env:
+          RUNNER_TEMP: /work/runner-temp
+          TMPDIR: /work/runner-temp
         with:
           path: /work/workspace/.repo
           key: lineage-source-${{ runner.os }}-${{ hashFiles('local_manifests/alice.xml', 'scripts/sync-source.sh') }}
@@ -156,6 +188,9 @@ jobs:
       - name: Save ccache
         if: ${{ always() && !inputs.disable_ccache }}
         uses: actions/cache/save@v4
+        env:
+          RUNNER_TEMP: /work/runner-temp
+          TMPDIR: /work/runner-temp
         with:
           path: /work/ccache
           key: ccache-alice-${{ github.run_id }}
