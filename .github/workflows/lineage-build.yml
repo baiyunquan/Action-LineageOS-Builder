@@ -26,6 +26,10 @@ on:
         description: 'Disable ccache and do not allocate a cache directory'
         type: boolean
         default: true
+      disable_repo_cache:
+        description: 'Disable .repo source cache (recommended on limited-disk runners)'
+        type: boolean
+        default: true
       use_cn_mirrors:
         description: 'Use Huawei Cloud then Aliyun Ubuntu mirrors (default: official Ubuntu mirrors)'
         type: boolean
@@ -100,12 +104,13 @@ jobs:
           restore-keys: |
             ccache-alice-
 
-      # The repo object store is the expensive part of a cold runner. Cache
-      # only .repo (not the large working tree or out/) so the archive has a
-      # chance of fitting the GitHub cache quota. Patches are applied after the
-      # sync step and are never part of this cache.
+      # The repo object store is the expensive part of a cold runner. This is
+      # opt-in because .repo can exceed the GitHub cache quota and its temporary
+      # archive can exhaust the runner's root filesystem. Patches are applied
+      # after the sync step and are never part of this cache.
       - name: Restore synced source cache
         id: source_cache
+        if: ${{ !inputs.disable_repo_cache }}
         uses: actions/cache/restore@v4
         env:
           RUNNER_TEMP: /work/runner-temp
@@ -128,7 +133,7 @@ jobs:
       # Saving it is deliberately non-blocking; a failed save must not discard
       # a valid ROM build. A cache hit is immutable, so only a cold sync saves.
       - name: Save synced source cache
-        if: ${{ steps.sync_source.outcome == 'success' && steps.source_cache.outputs.cache-hit != 'true' }}
+        if: ${{ !inputs.disable_repo_cache && steps.sync_source.outcome == 'success' && steps.source_cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
         env:
           RUNNER_TEMP: /work/runner-temp
@@ -139,7 +144,7 @@ jobs:
           df -h / /work /work/runner-temp
         shell: bash
       - name: Upload synced source cache
-        if: ${{ steps.sync_source.outcome == 'success' && steps.source_cache.outputs.cache-hit != 'true' }}
+        if: ${{ !inputs.disable_repo_cache && steps.sync_source.outcome == 'success' && steps.source_cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v4
         env:
