@@ -26,6 +26,10 @@ on:
         description: 'Disable ccache and do not allocate a cache directory'
         type: boolean
         default: true
+      use_cn_mirrors:
+        description: 'Use Huawei Cloud then Aliyun Ubuntu mirrors (default: official Ubuntu mirrors)'
+        type: boolean
+        default: false
       clean_ccache:
         description: 'Start from a cold ccache'
         type: boolean
@@ -100,6 +104,7 @@ jobs:
             -v "${{ github.workspace }}:/repo" \
             -e WORKDIR=/work/workspace \
             -e DISABLE_CCACHE='${{ inputs.disable_ccache }}' \
+            -e USE_CN_MIRRORS='${{ inputs.use_cn_mirrors }}' \
             -e CCACHE_DIR=/work/ccache \
             -e CCACHE_SIZE='${{ inputs.ccache_size }}' \
             -e BUILD_TIMEOUT='${{ inputs.build_timeout }}' \

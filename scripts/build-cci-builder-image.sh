@@ -15,6 +15,9 @@ CCI_DEADLINE_SECONDS="${CCI_DEADLINE_SECONDS:-3600}"
 # SWR/OBS endpoints.  EIP allocation is optional and currently exhausts the
 # Guiyang pool, so opt in only when a dedicated EIP is required.
 CCI_WITH_EIP="${CCI_WITH_EIP:-0}"
+# Keep the overseas-safe official Ubuntu archive as the default.  Set this to
+# 1 only when the CCI network is known to reach the mainland mirrors.
+USE_CN_MIRRORS="${USE_CN_MIRRORS:-0}"
 GITHUB_REPO="${GITHUB_REPO:-baiyunquan/Action-LineageOS-Builder}"
 GITHUB_REF="${GITHUB_REF:-main}"
 SWR_REGISTRY="${SWR_REGISTRY:-swr.cn-southwest-2.myhuaweicloud.com}"
@@ -60,7 +63,8 @@ crane auth login "${SWR_REGISTRY}" --username token --password "${SWR_AUTH}" >/d
 manifest="${tmp_dir}/pod.json"
 export CCI_REGION CCI_NAMESPACE CCI_INSTANCE_TYPE CCI_POD_SIZE CCI_EXTRA_STORAGE_GIB \
     CCI_DEADLINE_SECONDS CCI_WITH_EIP GITHUB_REPO GITHUB_REF SWR_REGISTRY SWR_NAMESPACE \
-    IMAGE_REPOSITORY KANIKO_IMAGE RUN_ID POD_NAME SECRET_NAME TARGET_IMAGE SWR_AUTH
+    IMAGE_REPOSITORY KANIKO_IMAGE RUN_ID POD_NAME SECRET_NAME TARGET_IMAGE SWR_AUTH \
+    USE_CN_MIRRORS
 secret_manifest="${tmp_dir}/secret.json"
 python3 - "${secret_manifest}" <<'PY'
 import json, os, sys
@@ -94,6 +98,7 @@ command = [
     "--context=https://github.com/" + repo + "/archive/refs/heads/" + ref + ".tar.gz",
     "--dockerfile=" + top + "/docker/cci-builder.Dockerfile",
     "--destination=" + destination,
+    "--build-arg=USE_CN_MIRRORS=" + os.environ["USE_CN_MIRRORS"],
     "--custom-platform=linux/amd64", "--cache=false", "--verbosity=info",
 ]
 body = {

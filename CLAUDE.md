@@ -82,7 +82,9 @@ the environment setup, keep them.
 1. **Do not rewrite bionic's apt sources to `old-releases.ubuntu.com`.** 18.04 is
    still under ESM, so bionic is on `archive.ubuntu.com`. Verified directly:
    `old-releases.../dists/bionic/Release` → 404, `archive.../dists/bionic/Release`
-   → 200. The rewrite made *every* package unresolvable.
+   → 200. The rewrite made *every* package unresolvable. The build scripts now
+   default to the official archive; `USE_CN_MIRRORS=1` is an explicit opt-in for
+   Huawei Cloud → Aliyun when running on a mainland-China network.
 2. **Never restore `set -u` after sourcing `envsetup.sh`.** `lunch` dies with
    `TOP: unbound variable`. `-u` stays off for the rest of the script.
 3. **`mka` is a shell function, not a binary.** Anything that execs it

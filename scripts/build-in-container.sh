@@ -36,12 +36,28 @@ else
     echo "==> Installing build dependencies (bionic)"
     export DEBIAN_FRONTEND=noninteractive
 
-    # Huawei's official mirror documents Ubuntu at repo.huaweicloud.com.  The
-    # Aliyun mirror is a practical fallback for regions where the Huawei CDN
-    # is unavailable.  Keep this source list private to this invocation so we
-    # do not mutate the base image's apt configuration.
-    APT_MIRROR_PRIMARY="${APT_MIRROR_PRIMARY:-https://repo.huaweicloud.com/ubuntu}"
-    APT_MIRROR_FALLBACK="${APT_MIRROR_FALLBACK:-https://mirrors.aliyun.com/ubuntu}"
+    # GitHub-hosted runners are outside mainland China, so the CN mirrors can
+    # be unreachable or return a proxy-generated TLS response.  Keep them
+    # opt-in.  The default uses the official Ubuntu archives; set
+    # USE_CN_MIRRORS=true to try Huawei Cloud and then Aliyun instead.
+    use_cn_mirrors="${USE_CN_MIRRORS:-0}"
+    case "${use_cn_mirrors,,}" in
+        1|true|yes|on)
+            APT_MIRROR_PRIMARY="${APT_MIRROR_PRIMARY:-http://repo.huaweicloud.com/ubuntu}"
+            APT_MIRROR_FALLBACK="${APT_MIRROR_FALLBACK:-http://mirrors.aliyun.com/ubuntu}"
+            APT_MIRROR_LABEL="Huawei Cloud/Aliyun"
+            ;;
+        *)
+            APT_MIRROR_PRIMARY="${APT_MIRROR_PRIMARY:-http://archive.ubuntu.com/ubuntu}"
+            APT_MIRROR_FALLBACK="${APT_MIRROR_FALLBACK:-http://security.ubuntu.com/ubuntu}"
+            APT_MIRROR_LABEL="official Ubuntu"
+            ;;
+    esac
+    echo "   apt mirror mode: ${APT_MIRROR_LABEL} (USE_CN_MIRRORS=${use_cn_mirrors})"
+
+    # Keep this source list private to this invocation so we do not mutate the
+    # base image's apt configuration.  HTTP is intentional here: the minimal
+    # ubuntu:18.04 image has no CA bundle until ca-certificates is installed.
     apt_source_list="$(mktemp /tmp/lineage-apt-sources.XXXXXX)"
     apt_get=(apt-get -o "Dir::Etc::sourcelist=${apt_source_list}" \
         -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0)
@@ -64,12 +80,12 @@ else
         echo "   apt mirror failed: ${candidate}" >&2
     done
     [[ -n "${apt_mirror}" ]] || {
-        echo "!! Huawei and Aliyun apt mirrors are unavailable" >&2
+        echo "!! ${APT_MIRROR_LABEL} apt mirrors are unavailable" >&2
         exit 1
     }
 
     "${apt_get[@]}" install -y -qq --no-install-recommends \
-        openjdk-8-jdk \
+        ca-certificates openjdk-8-jdk \
         bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
         gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev \
         liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \

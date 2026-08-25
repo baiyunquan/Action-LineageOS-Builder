@@ -69,10 +69,9 @@ CCACHE_SIZE="${CCACHE_SIZE:-32G}"
 BUILD_JOBS="${BUILD_JOBS:-16}"
 REPO_URL="${REPO_URL:-https://github.com/baiyunquan/Action-LineageOS-Builder.git}"
 REPO_DIR="${REPO_DIR:-}"
-# Huawei documents repo.huaweicloud.com/ubuntu for Ubuntu packages.  Aliyun is
-# used only when the Huawei mirror cannot refresh the selected Ubuntu release.
-APT_MIRROR_PRIMARY="${APT_MIRROR_PRIMARY:-https://repo.huaweicloud.com/ubuntu}"
-APT_MIRROR_FALLBACK="${APT_MIRROR_FALLBACK:-https://mirrors.aliyun.com/ubuntu}"
+# GitHub/ECS hosts outside mainland China should use the official Ubuntu
+# archive.  Set USE_CN_MIRRORS=1 to try Huawei Cloud and then Aliyun instead.
+USE_CN_MIRRORS="${USE_CN_MIRRORS:-0}"
 # ========================== 编辑区结束 ====================================
 
 export DEBIAN_FRONTEND=noninteractive
@@ -111,6 +110,17 @@ write_jammy_sources() {
         "deb ${mirror} jammy-security main restricted universe multiverse" \
         >"${APT_SOURCE_LIST}"
 }
+case "${USE_CN_MIRRORS,,}" in
+    1|true|yes|on)
+        APT_MIRROR_PRIMARY="${APT_MIRROR_PRIMARY:-http://repo.huaweicloud.com/ubuntu}"
+        APT_MIRROR_FALLBACK="${APT_MIRROR_FALLBACK:-http://mirrors.aliyun.com/ubuntu}"
+        APT_MIRROR_LABEL='Huawei Cloud/Aliyun' ;;
+    *)
+        APT_MIRROR_PRIMARY="${APT_MIRROR_PRIMARY:-http://archive.ubuntu.com/ubuntu}"
+        APT_MIRROR_FALLBACK="${APT_MIRROR_FALLBACK:-http://security.ubuntu.com/ubuntu}"
+        APT_MIRROR_LABEL='official Ubuntu' ;;
+esac
+log "APT 镜像模式: ${APT_MIRROR_LABEL} (USE_CN_MIRRORS=${USE_CN_MIRRORS})"
 APT_MIRROR_SELECTED=""
 for candidate in "${APT_MIRROR_PRIMARY}" "${APT_MIRROR_FALLBACK}"; do
     write_jammy_sources "${candidate}"
@@ -121,7 +131,7 @@ for candidate in "${APT_MIRROR_PRIMARY}" "${APT_MIRROR_FALLBACK}"; do
     fi
     warn "APT 镜像源不可用: ${candidate}"
 done
-[[ -n "${APT_MIRROR_SELECTED}" ]] || die "华为云和阿里云 APT 镜像都不可用"
+[[ -n "${APT_MIRROR_SELECTED}" ]] || die "${APT_MIRROR_LABEL} APT 镜像都不可用"
 "${APT_GET[@]}" install -y --no-install-recommends \
     ca-certificates curl git git-lfs rsync unzip zip python3 python3-pip \
     python3-venv build-essential bc bison flex gperf ccache docker.io \

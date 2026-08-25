@@ -8,13 +8,16 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG OBSUTIL_URL=https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz
 ARG GIT_LFS_VERSION=3.5.1
-ARG APT_MIRROR_PRIMARY=https://repo.huaweicloud.com/ubuntu
-ARG APT_MIRROR_FALLBACK=https://mirrors.aliyun.com/ubuntu
+ARG USE_CN_MIRRORS=false
+ARG APT_MIRROR_PRIMARY=
+ARG APT_MIRROR_FALLBACK=
 
-# Bionic's public archive is still available, but old-releases.ubuntu.com no
-# longer carries bionic.  Prefer Huawei's documented Ubuntu mirror and fall
-# back to Aliyun if the ECS/CCI network cannot reach Huawei.  Disable the
-# expiry check so a cached CCI base cannot make apt fail with an opaque 100.
+# The default uses the official Ubuntu archive.  Set USE_CN_MIRRORS=true for a
+# mainland-China CCI network to try Huawei Cloud and then Aliyun.  HTTP is used
+# only for the first apt transaction because the base image has no CA bundle;
+# ca-certificates is installed in that transaction before HTTPS downloads.
+# Disable the expiry check so a cached CCI base cannot make apt fail with an
+# opaque 100.
 # Every apt operation is logged before its error is re-raised; Kaniko therefore
 # leaves useful diagnostics in the build log and in /var/log/cci-builder-apt.log.
 RUN set -Eeuo pipefail; \
@@ -31,6 +34,18 @@ RUN set -Eeuo pipefail; \
       'Acquire::Check-Valid-Until "false";' \
       'Acquire::Retries "3";' \
       > /etc/apt/apt.conf.d/99cci-builder; \
+    use_cn_mirrors="$${USE_CN_MIRRORS}"; \
+    case "$${use_cn_mirrors,,}" in \
+      1|true|yes|on) \
+        mirror_primary="$${APT_MIRROR_PRIMARY:-http://repo.huaweicloud.com/ubuntu}"; \
+        mirror_fallback="$${APT_MIRROR_FALLBACK:-http://mirrors.aliyun.com/ubuntu}"; \
+        mirror_label='Huawei Cloud/Aliyun' ;; \
+      *) \
+        mirror_primary="$${APT_MIRROR_PRIMARY:-http://archive.ubuntu.com/ubuntu}"; \
+        mirror_fallback="$${APT_MIRROR_FALLBACK:-http://security.ubuntu.com/ubuntu}"; \
+        mirror_label='official Ubuntu' ;; \
+    esac; \
+    echo "apt mirror mode: $${mirror_label} (USE_CN_MIRRORS=$${use_cn_mirrors})"; \
     apt_run() { \
       echo "### apt $*" >> /var/log/cci-builder-apt.log; \
       "$@" >> /var/log/cci-builder-apt.log 2>&1 || { \
@@ -38,10 +53,10 @@ RUN set -Eeuo pipefail; \
       }; \
     }; \
     : > /var/log/cci-builder-apt.log; \
-    write_sources "$${APT_MIRROR_PRIMARY}"; \
+    write_sources "$${mirror_primary}"; \
     if ! apt_run apt-get update; then \
-      echo "### Huawei apt mirror failed; retrying Aliyun" >&2; \
-      write_sources "$${APT_MIRROR_FALLBACK}"; \
+      echo "### $${mirror_label} primary mirror failed; retrying fallback" >&2; \
+      write_sources "$${mirror_fallback}"; \
       apt_run apt-get update; \
     fi; \
     apt_run env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

@@ -140,13 +140,15 @@ checkpoint 实现断点续跑，而 `build-inner.sh` 仍只负责一次 envsetup
 
 这四条是真金白银的 CI 运行换来的，本地方案里已经全部规避：
 
-### 1. bionic 的 apt 源不能改 old-releases
+### 1. bionic 的 apt 源与网络位置
 
-Ubuntu 18.04 的包不能指向 `old-releases.ubuntu.com`（该站点的 bionic
-Release 返回 **404**）。容器脚本和 CCI Dockerfile 现在使用一次性的源列表，
-优先 `https://repo.huaweicloud.com/ubuntu`，失败时回退
-`https://mirrors.aliyun.com/ubuntu`；两个镜像都保留 `bionic-security`。
-这样既能利用华为云 ECS/CCI 的镜像站，又不会改写宿主机或基础镜像的 apt 配置。
+Ubuntu 18.04 的 APT 源通过一次性源列表配置。默认使用官方
+`archive.ubuntu.com`（失败时回退 `security.ubuntu.com`），适合微软/海外 runner；
+在大陆网络中可设置 `USE_CN_MIRRORS=1`，再按“华为云 → 阿里云”顺序尝试国内镜像。
+两个模式都保留 `bionic-security`，且不会改写宿主机或基础镜像的永久 apt 配置。
+
+APT 启动阶段使用 HTTP，是因为最小化 `ubuntu:18.04` 镜像尚未安装 CA 根证书；
+依赖列表随后会安装 `ca-certificates`。
 
 Android/Lineage 源码本身仍从 GitHub 获取；目前没有可验证的华为云或阿里云
 完整 Git/LFS 镜像，不能把 GitHub 地址盲目替换成第三方镜像。

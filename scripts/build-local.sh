@@ -14,6 +14,7 @@
 #   ./scripts/build-local.sh --resume           reuse the last container/image checkpoint
 #   ./scripts/build-local.sh --checkpoint-interval 15m
 #   ./scripts/build-local.sh --disable-ccache    do not create/use a ccache directory
+#   ./scripts/build-local.sh --use-cn-mirrors    use Huawei Cloud then Aliyun apt mirrors
 #
 # NOTE: this script has not been run end to end. It is written from the four
 # failures the CI path hit (see LOCAL_BUILD.md), but the local path itself is
@@ -33,6 +34,7 @@ BUILD_TARGET="${BUILD_TARGET:-bacon}"
 JOBS="${JOBS:-$(nproc)}"
 CCACHE_SIZE="${CCACHE_SIZE:-50G}"
 DISABLE_CCACHE="${DISABLE_CCACHE:-0}"
+USE_CN_MIRRORS="${USE_CN_MIRRORS:-0}"
 CHECKPOINT_ENABLE="${CHECKPOINT_ENABLE:-1}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-15m}"
 CHECKPOINT_IMAGE="${CHECKPOINT_IMAGE:-}"
@@ -49,6 +51,7 @@ while [ $# -gt 0 ]; do
         --jobs)        JOBS="$2"; shift 2 ;;
         --ccache-size) CCACHE_SIZE="$2"; shift 2 ;;
         --disable-ccache) DISABLE_CCACHE=1; shift ;;
+        --use-cn-mirrors) USE_CN_MIRRORS=1; shift ;;
         --target)      BUILD_TARGET="$2"; shift 2 ;;
         --native)      MODE=native; shift ;;
         --skip-sync)   DO_SYNC=0; shift ;;
@@ -180,6 +183,7 @@ else
             [ -n "${proxy_value}" ] && \
                 docker_build_args+=( --build-arg "${proxy_name}=${proxy_value}" )
         done
+        docker_build_args+=( --build-arg "USE_CN_MIRRORS=${USE_CN_MIRRORS}" )
         docker build --network host "${docker_build_args[@]}" \
             -t "${IMAGE}" "${REPODIR}/docker"
     fi

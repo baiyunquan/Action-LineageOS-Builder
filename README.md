@@ -11,14 +11,15 @@ DanteFX 编译的通用 hi6210sft **LineageOS 14.1 已实测可用，WiFi、通�
 
 ## 当前状态
 
-**尚未产出可刷机的 ROM。** CI 上跑了 4 轮，逐个修掉了真实的构建错误：
+**尚未产出可刷机的 ROM。** CI 上跑过多轮，逐个修掉了真实的构建错误：
 
 | Run | 结果 | 修复 |
 |---|---|---|
-| 1 | apt 全部包找不到 | `sed` 把源改到 old-releases 是**写反的** —— bionic 在华为云镜像可用，脚本现在优先 `repo.huaweicloud.com/ubuntu`，失败回退阿里云，同时检查 apt 退出码 |
+| 1 | apt 全部包找不到 | 初版把 bionic 源改到 `old-releases`；后来改为显式源列表并检查 apt 退出码 |
 | 2 | `exit 127` | `timeout ... mka` —— `mka` 是 `envsetup.sh` 定义的 shell 函数，无法被 exec。改用 `make -j N bacon` |
 | 3 | 编译到 5% (4878/92680) 后失败 | Jack server 在容器内 SSL 握手失败。改用 javac（`ANDROID_COMPILE_WITH_JACK=false`） |
 | 4 | 连续编译约 2 小时后，`Save ccache` 步骤失败 | **未确认**：该步失败导致后续校验/上传被跳过，编译本身是否产出 zip 未能查证 |
+| 最新海外 runner | 依赖安装阶段失败 | 微软 runner 无法使用华为云/阿里云 APT 镜像；现已增加 `use_cn_mirrors`，默认使用官方 Ubuntu 镜像 |
 
 已确认可用的部分：repo 同步、设备树补丁、`alice_patcher` 补丁、`lunch`
 （`TARGET_PRODUCT=lineage_alice`）、以及约 2 小时的实际编译。
@@ -109,6 +110,11 @@ CI 上每次重跑都要把 92680 个目标重新走一遍，本地改一行重�
 
 在 GitHub 上新建仓库，把本目录内容推上去，然后手动触发
 **Actions → LineageOS 15.1 (CAM-TL00 / hi6210sft) → Run workflow**。
+
+工作流输入 `use_cn_mirrors` 默认关闭，适配微软/海外 runner：依赖安装使用官方
+Ubuntu 镜像；只有在确认 runner 能访问中国大陆网络时才打开它，脚本才会按
+“华为云 → 阿里云”顺序尝试 APT 镜像。这个开关只影响 Ubuntu 依赖安装，Android
+源码仍从 GitHub 同步。
 
 ### 关于 6 小时上限（重要）
 

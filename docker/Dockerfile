@@ -11,12 +11,27 @@
 #   docker build -t lineageos-15.1-builder docker/
 FROM ubuntu:18.04
 
-ARG APT_MIRROR_PRIMARY=https://repo.huaweicloud.com/ubuntu
-ARG APT_MIRROR_FALLBACK=https://mirrors.aliyun.com/ubuntu
+ARG USE_CN_MIRRORS=false
+ARG APT_MIRROR_PRIMARY=
+ARG APT_MIRROR_FALLBACK=
 
-# Do NOT rewrite these to old-releases.ubuntu.com. 18.04's bionic Release is
-# available from Huawei's mirror and Aliyun's mirror; old-releases returns 404.
+# The default is the official Ubuntu archive, which is reachable from GitHub's
+# overseas runners.  Set --build-arg USE_CN_MIRRORS=true when building on a
+# mainland-China host to try Huawei Cloud and then Aliyun instead.  HTTP is
+# used for the bootstrap because the minimal image has no CA bundle yet.
 RUN set -Eeuo pipefail; \
+    use_cn_mirrors="$${USE_CN_MIRRORS}"; \
+    case "$${use_cn_mirrors,,}" in \
+      1|true|yes|on) \
+        mirror_primary="$${APT_MIRROR_PRIMARY:-http://repo.huaweicloud.com/ubuntu}"; \
+        mirror_fallback="$${APT_MIRROR_FALLBACK:-http://mirrors.aliyun.com/ubuntu}"; \
+        mirror_label='Huawei Cloud/Aliyun' ;; \
+      *) \
+        mirror_primary="$${APT_MIRROR_PRIMARY:-http://archive.ubuntu.com/ubuntu}"; \
+        mirror_fallback="$${APT_MIRROR_FALLBACK:-http://security.ubuntu.com/ubuntu}"; \
+        mirror_label='official Ubuntu' ;; \
+    esac; \
+    echo "apt mirror mode: $${mirror_label} (USE_CN_MIRRORS=$${use_cn_mirrors})"; \
     write_sources() { \
       printf '%s\n' \
         "deb $${1%/} bionic main restricted universe multiverse" \
@@ -24,13 +39,14 @@ RUN set -Eeuo pipefail; \
         "deb $${1%/} bionic-security main restricted universe multiverse" \
         > /etc/apt/sources.list; \
     }; \
-    write_sources "$${APT_MIRROR_PRIMARY}"; \
+    write_sources "$${mirror_primary}"; \
     if ! apt-get update; then \
-      echo 'Huawei apt mirror failed; retrying Aliyun' >&2; \
-      write_sources "$${APT_MIRROR_FALLBACK}"; \
+      echo "$${mirror_label} primary mirror failed; retrying fallback" >&2; \
+      write_sources "$${mirror_fallback}"; \
       apt-get update; \
     fi; \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
         openjdk-8-jdk \
         bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
         git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev \
