@@ -49,8 +49,12 @@ apply_source_patch() {
 
 apply_source_patch device/huawei/alice \
     "${PATCHDIR}/device-huawei-alice/0001-wifi-ril-compat.patch"
+apply_source_patch kernel/huawei/alice \
+    "${PATCHDIR}/kernel-huawei-alice/0001-enable-tcpmss-for-hisi-tethering.patch"
 apply_source_patch vendor/huawei/alice \
     "${PATCHDIR}/vendor-huawei-alice/0001-hi1101-b302-firmware.patch"
+apply_source_patch vendor/huawei/alice \
+    "${PATCHDIR}/vendor-huawei-alice/0002-cam-stock-balong-ril.patch"
 
 # Replace the whole assignment line, or append if the key is absent.
 set_mk_var() {
