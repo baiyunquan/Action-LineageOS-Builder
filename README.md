@@ -116,6 +116,11 @@ Ubuntu 镜像；只有在确认 runner 能访问中国大陆网络时才打开�
 “华为云 → 阿里云”顺序尝试 APT 镜像。这个开关只影响 Ubuntu 依赖安装，Android
 源码仍从 GitHub 同步。
 
+工作流还会缓存 `/work/workspace/.repo`（repo 的对象/元数据，不包含 `out/` 或已打
+补丁工作树）。下一次运行先恢复该缓存，再执行 `repo sync` 完成工作树检出，通常能
+避免重新下载大部分 Git 对象；缓存过大超过 GitHub 配额时保存步骤会被忽略，但不会
+让编译失败。
+
 ### 关于 6 小时上限（重要）
 
 > ⚠ 补充说明：GitHub runner 是**临时的**，`out/` 与源码树在两次运行之间
@@ -235,7 +240,8 @@ lineage_build/
 ├── scripts/
 │   ├── build-local.sh                    # 本地：总驱动（预检→同步→编译→门禁）
 │   ├── build-inner.sh                    # 本地：纯编译步骤，无超时续跑逻辑
-│   ├── sync-source.sh                    # 共用：repo init/sync + 打补丁
+│   ├── sync-source.sh                    # 共用：repo init/sync（保持源码干净）
+│   ├── apply-source-patches.sh           # 共用：应用补丁并校验 vendor blob
 │   ├── apply-device-patches.sh           # 共用：设备树三处改动（幂等）
 │   ├── apply-alice-patcher.sh            # 共用：alice_patcher 的幂等替代（见下）
 │   ├── build-in-container.sh             # CI：bionic 容器内编译，带超时续跑

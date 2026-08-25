@@ -45,7 +45,8 @@ step differs.
 | `scripts/cci-run.sh` | local KooCLI | create, poll, and delete one Huawei CCI2 build Pod |
 | `scripts/cci-pod-entrypoint.sh` | CCI2 Pod | clone GitHub, sync, build, and upload OBS state |
 | `CCI_RUNBOOK.md` | — | verified Guiyang CCI2/SWR/OBS resources and constraints |
-| `scripts/sync-source.sh` | host | shared: repo init/sync, then both patch scripts |
+| `scripts/sync-source.sh` | host | shared: pristine repo init/sync |
+| `scripts/apply-source-patches.sh` | host | shared: apply all local patches and verify blobs |
 | `scripts/apply-device-patches.sh` | host | shared: the 3 BoardConfig.mk edits |
 | `scripts/apply-alice-patcher.sh` | host | shared: idempotent replacement for `patches.sh` |
 | `scripts/verify-rom.py` | host | shared: output gate, run before anything reaches the phone |
@@ -115,9 +116,9 @@ step an `if: always()`-style guard so it cannot skip the verify/upload steps.
   deletes one file, so it is done directly. **Do not drop this step** — it stops
   radio services being killed under Huawei RIL, and telephony is a
   confirmed-working feature on this phone.
-- `repo sync --force-sync` on a second run runs over a tree that already has
-  local modifications. Patch application happens *after* sync in
-  `sync-source.sh`; keep that order.
+- `repo sync --force-sync` runs against the pristine checkout restored from the
+  CI `.repo` cache. Patch application happens *after* sync in
+  `apply-source-patches.sh`; keep that order.
 - `build-in-container.sh` deliberately uses `set -uo pipefail` **without `-e`**,
   because it needs to inspect `mka`'s exit code. Exit 124 from `timeout` is
   translated to **75** = "ran out of time, re-run me"; the workflow treats 75 as

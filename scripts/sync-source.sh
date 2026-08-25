@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 #
-# Sync the LineageOS 15.1 tree and prepare it for a CAM-TL00 build.
+# Sync the pristine LineageOS 15.1 tree for a CAM-TL00 build.
+#
+# Patching is deliberately a separate step (apply-source-patches.sh). This
+# lets CI cache this unmodified checkout and re-apply the exact local patches
+# after restoring it on the next run.
 #
 # Runs on the GitHub Actions HOST (ubuntu-22.04), not inside the build
 # container: repo needs a modern python3, while the compiler needs an old
@@ -77,12 +81,4 @@ echo "==> Kernel branch check"
 kver="$(grep -m1 '^SUBLEVEL' kernel/huawei/alice/Makefile | tr -dc '0-9')"
 echo "   kernel 3.10.${kver}"
 
-bash "${SCRIPTDIR}/apply-device-patches.sh" device/huawei/alice
-bash "${SCRIPTDIR}/apply-alice-patcher.sh" "${WORKDIR}"
-
-# The device patcher applies the CAM-specific hi1101 B302 firmware update to
-# the pinned vendor checkout. Verify the post-patch source that will actually
-# feed PRODUCT_COPY_FILES, not merely the pristine git commit.
-python3 "${SCRIPTDIR}/verify-vendor-blobs.py" --source-root "${WORKDIR}"
-
-echo "==> Source tree ready at ${WORKDIR}"
+echo "==> Pristine source tree ready at ${WORKDIR}"

@@ -86,6 +86,9 @@ export GIT_EMAIL="${GIT_EMAIL:-cci-builder@localhost}"
 export JOBS="${JOBS:-$(nproc)}"
 bash "${BUILDER_DIR}/scripts/sync-source.sh"
 
+echo "==> Applying CAM-TL00 patches"
+bash "${BUILDER_DIR}/scripts/apply-source-patches.sh" "${SOURCE_DIR}"
+
 echo "==> Restoring ccache from OBS"
 "${WORK_ROOT}/obsutil" cp "obs://${OBS_BUCKET}/cache/${GITHUB_REPO}/" \
     "${CCACHE_DIR}" -r -u -f -config="${OBS_CONFIG}" || true

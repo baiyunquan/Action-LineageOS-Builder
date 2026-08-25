@@ -38,7 +38,8 @@ The old CCI1 `Job` endpoint rejects this account's sale policy and is not used.
 The local KooCLI runner will:
 
 1. create one Pod with `activeDeadlineSeconds` and `restartPolicy: Never`;
-2. let the Pod clone the public GitHub repository, run `sync-source.sh`, hydrate
+2. let the Pod clone the public GitHub repository, run `sync-source.sh`, then
+   `apply-source-patches.sh`, and hydrate
    Git LFS, and run `build-in-container.sh`;
 3. upload logs, ccache, and verified ROM artifacts to the private OBS bucket;
 4. poll `readNamespacedPod` until `Succeeded`/`Failed`; and

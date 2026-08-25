@@ -156,10 +156,11 @@ if [ "${DO_SYNC}" -eq 1 ]; then
 else
     echo "==> Skipping sync"
     [ -d "${WORKDIR}/.repo" ] || { echo "!! no tree at ${WORKDIR}" >&2; exit 1; }
-    # Patches are idempotent, so re-apply in case a manual repo sync reverted them.
-    bash "${SCRIPTDIR}/apply-device-patches.sh" "${WORKDIR}/device/huawei/alice"
-    bash "${SCRIPTDIR}/apply-alice-patcher.sh" "${WORKDIR}"
 fi
+
+# Keep patching outside sync-source.sh so a pristine source cache can be
+# restored and then deterministically prepared for each build.
+bash "${SCRIPTDIR}/apply-source-patches.sh" "${WORKDIR}"
 
 # -------------------------------------------------------------------- build --
 

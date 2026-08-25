@@ -85,12 +85,42 @@ jobs:
           restore-keys: |
             ccache-alice-
 
-      - name: Sync source and apply CAM-TL00 patches
+      # The repo object store is the expensive part of a cold runner. Cache
+      # only .repo (not the large working tree or out/) so the archive has a
+      # chance of fitting the GitHub cache quota. Patches are applied after the
+      # sync step and are never part of this cache.
+      - name: Restore synced source cache
+        id: source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /work/workspace/.repo
+          key: lineage-source-${{ runner.os }}-${{ hashFiles('local_manifests/alice.xml', 'scripts/sync-source.sh') }}
+          restore-keys: |
+            lineage-source-${{ runner.os }}-
+
+      - name: Sync source
+        id: sync_source
         env:
           WORKDIR: /work/workspace
           GIT_NAME: ${{ github.actor }}
           GIT_EMAIL: ${{ github.actor }}@users.noreply.github.com
         run: bash scripts/sync-source.sh
+
+      # The repo object store can still exceed the repository's cache quota.
+      # Saving it is deliberately non-blocking; a failed save must not discard
+      # a valid ROM build. A cache hit is immutable, so only a cold sync saves.
+      - name: Save synced source cache
+        if: ${{ steps.sync_source.outcome == 'success' && steps.source_cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: /work/workspace/.repo
+          key: lineage-source-${{ runner.os }}-${{ hashFiles('local_manifests/alice.xml', 'scripts/sync-source.sh') }}
+
+      - name: Apply CAM-TL00 patches
+        env:
+          WORKDIR: /work/workspace
+        run: bash scripts/apply-source-patches.sh /work/workspace
 
       - name: Disk after sync
         run: df -h / /work

@@ -119,7 +119,8 @@ tail -n 20 /work/lineage-build/checkpoints/commits.log
 | `scripts/build-local.sh` | 宿主机 | 总驱动：预检 → 同步 → 编译 → 门禁 |
 | `docker/Dockerfile` | — | `ubuntu:18.04` 构建镜像，依赖只装一次 |
 | `scripts/build-inner.sh` | 容器内 | 纯编译步骤（envsetup / lunch / make） |
-| `scripts/sync-source.sh` | 宿主机 | 与 CI 共用：repo 同步 + 打补丁 |
+| `scripts/sync-source.sh` | 宿主机 | 与 CI 共用：repo 同步（保持源码干净） |
+| `scripts/apply-source-patches.sh` | 宿主机 | 同步后应用全部补丁并校验 vendor blob |
 | `scripts/apply-device-patches.sh` | 宿主机 | 与 CI 共用：设备树三处改动 |
 | `scripts/apply-alice-patcher.sh` | 宿主机 | 与 CI 共用：幂等补丁 |
 | `scripts/verify-rom.py` | 宿主机 | 与 CI 共用：产物门禁 |
