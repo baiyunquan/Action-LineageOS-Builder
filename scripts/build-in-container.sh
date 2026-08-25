@@ -135,27 +135,35 @@ lfs_failed=0
 hydrate_lfs_repo() {
     local repo="$1"
     [ -d "${repo}" ] || return 0
+    local repo_abs
+    repo_abs="$(cd "${repo}" && pwd)"
 
-    echo "   LFS repo: ${repo}"
-    if ! git -C "${repo}" lfs env >/dev/null 2>&1; then
+    echo "   LFS repo: ${repo_abs}"
+    # The source tree is checked out by the host runner and then mounted into
+    # this root-owned container. Git's ownership guard therefore rejects the
+    # project before Git LFS can run. Add only these known source directories to
+    # the ephemeral container config; this also reaches Git subprocesses that
+    # git-lfs starts internally.
+    git config --global --add safe.directory "${repo_abs}" >/dev/null 2>&1 || true
+    if ! git -C "${repo_abs}" lfs env >/dev/null 2>&1; then
         echo "!! git lfs is not usable in ${repo}" >&2
         lfs_failed=1
         return 0
     fi
-    lfs_endpoint="$(git -C "${repo}" config --file=.lfsconfig --get lfs.url 2>/dev/null || true)"
+    lfs_endpoint="$(git -C "${repo_abs}" config --file=.lfsconfig --get lfs.url 2>/dev/null || true)"
     if [ -n "${lfs_endpoint}" ]; then
         echo "   LFS endpoint: ${lfs_endpoint}"
-        lfs_pull=(git -C "${repo}" -c "lfs.url=${lfs_endpoint}" lfs pull)
+        lfs_pull=(git -C "${repo_abs}" -c "lfs.url=${lfs_endpoint}" lfs pull)
     else
-        lfs_pull=(git -C "${repo}" lfs pull)
+        lfs_pull=(git -C "${repo_abs}" lfs pull)
     fi
     if ! "${lfs_pull[@]}"; then
-        echo "!! git lfs pull failed for ${repo}" >&2
+        echo "!! git lfs pull failed for ${repo_abs}" >&2
         lfs_failed=1
         return 0
     fi
-    if ! git -C "${repo}" lfs checkout; then
-        echo "!! git lfs checkout failed for ${repo}" >&2
+    if ! git -C "${repo_abs}" lfs checkout; then
+        echo "!! git lfs checkout failed for ${repo_abs}" >&2
         lfs_failed=1
     fi
 }
