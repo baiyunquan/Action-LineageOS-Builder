@@ -1,13 +1,17 @@
 # source path is relative to vendor/huawei/alice/proprietary.
 # image path is relative to the Android system image root.
 # These are the Android 8.1 hi6210sft blobs from the pinned vendor commit after
-# the reproducible CAM hi1101 B302 patch, not untracked Android 6 stock files.
-lib64/libbalong-ril.so	lib64/libbalong-ril.so	dcbb46ec581013a6f13c36dfa3cdb3c769211168e5614cc0cb7c0f321e01aaf4
-vendor/lib64/libbalong-ril.so	vendor/lib64/libbalong-ril.so	dcbb46ec581013a6f13c36dfa3cdb3c769211168e5614cc0cb7c0f321e01aaf4
+# the reproducible CAM hi1101 B302 patch.  libbalong-ril.so additionally carries
+# the byte-checked sync_sim_slot_cfg fix; the Android 6 stock RIL is not used.
+lib64/libbalong-ril.so	lib64/libbalong-ril.so	5dd2fa7b0ca370e28b705a3433136a392260cbd071b4e5d0167edc019c11dba5
+vendor/lib64/libbalong-ril.so	vendor/lib64/libbalong-ril.so	5dd2fa7b0ca370e28b705a3433136a392260cbd071b4e5d0167edc019c11dba5
 lib64/libbalong-ril-1.so	lib64/libbalong-ril-1.so	f075cf226fe2260e8538edcc13f254f3b7aef1273f5bc86e0d67fc9e44aae1aa
 vendor/lib64/libbalong-ril-1.so	vendor/lib64/libbalong-ril-1.so	f075cf226fe2260e8538edcc13f254f3b7aef1273f5bc86e0d67fc9e44aae1aa
 lib64/libbalong-ril-2.so	lib64/libbalong-ril-2.so	c9eccbb5995cd03c34f19410fa98082acd49ec6b80d45789eecda3dbd6ee7a42
 vendor/lib64/libbalong-ril-2.so	vendor/lib64/libbalong-ril-2.so	c9eccbb5995cd03c34f19410fa98082acd49ec6b80d45789eecda3dbd6ee7a42
+lib64/libril.so	lib64/libril.so	c0c3f9d0dbfb184a24d69868ce5c595054827a5b29d5609f2dd77c1bbf0a6e93
+vendor/lib64/libril.so	vendor/lib64/libril.so	c0c3f9d0dbfb184a24d69868ce5c595054827a5b29d5609f2dd77c1bbf0a6e93
+vendor/bin/hw/rild	vendor/bin/hw/rild	930a361f8a283d27e6ebb97420589589839e34e966726e6cac5ca43693dee455
 vendor/lib/libbt-vendor.so	vendor/lib/libbt-vendor.so	9939fab40abc1e79802fb9a9a9215ea6bb9738a20fa45a596479ae4a30e13538
 vendor/lib/libbt-vendor-hi110x.so	vendor/lib/libbt-vendor-hi110x.so	9939fab40abc1e79802fb9a9a9215ea6bb9738a20fa45a596479ae4a30e13538
 vendor/lib64/libbt-vendor.so	vendor/lib64/libbt-vendor.so	f1d170aa694b65c42dc935ae8f37f6741ad7792f85f1e4c7960e11b1129909f1

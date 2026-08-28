@@ -89,6 +89,27 @@ WITH_DEXPREOPT := false                              # 省时间，也省 system
 脚本同时**断言** kernel 地址、system/boot/recovery/cache 四个分区尺寸没有漂移 ——
 这些值一旦被上游改动就会导致刷不进或刷不开机。
 
+### RIL SIM 卡槽编号兼容修复
+
+`persist.radio.sim_slot_cfg` 保持 framework 使用的 `0,1`。原厂 EMUI 的
+`sync_sim_slot_cfg` 会把这两个值转换为 modem 使用的 `1,2` 后发送
+`AT^SIMSLOT=1,2`；Android 8.1 预编译 RIL 曾把属性原样发送为 `AT^SIMSLOT=0,1`，
+从而触发 RIL 重置。`scripts/apply-device-patches.sh` 现在调用
+`scripts/patch-ril-simslot.py`，覆盖同步、恢复和两参数设置路径：把 framework 的
+`0,1` 转换为 modem 的 `1,2`，不会再发送零基的 `AT^SIMSLOT=0,1`；设置成功后仍把
+属性写回零基值。脚本以 SHA-256 和固定指令字节拒绝未确认的 RIL 版本。manifest
+中的期望哈希对应修复后的二进制；不会把 `persist.radio.sim_slot_cfg` 全局改成
+`1,2`，也不修改其它 RIL 请求路径。
+
+### 双 RIL/HIDL 服务归属修复
+
+原厂 EMUI 的 `rild` 是传统 socket RIL；当前 Android 8.1 则由两个 `rild` 进程
+加载 HIDL `libril.so`。旧二进制让两个进程都注册 `slot1`、`slot2`、`slot3` 和
+控制服务，后启动的 modem1 会覆盖 modem0 的 framework 服务。`scripts/patch-ril-hidl-registration.py`
+只接受固定 SHA-256 的 Android 25 ARM64 `rild/libril.so`：按 AOSP 的 `-c 1` 规则
+生成 `slot2`，并让每个进程只注册自己的动态 slot。因此 modem0 → slot1、modem1 →
+slot2；SIMSLOT 指令和 `persist.radio.sim_slot_cfg=0,1` 完全不变。
+
 ---
 
 ## 编译

@@ -14,7 +14,8 @@ set -euo pipefail
 DEVICE_TREE="${1:-device/huawei/alice}"
 BOARD_CONFIG="${DEVICE_TREE}/BoardConfig.mk"
 ROOTDIR="$(cd "${DEVICE_TREE}/../../.." && pwd)"
-PATCHDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../patches" && pwd)"
+SCRIPTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PATCHDIR="$(cd "${SCRIPTDIR}/../patches" && pwd)"
 
 [ -f "${BOARD_CONFIG}" ] || { echo "!! ${BOARD_CONFIG} not found" >&2; exit 1; }
 
@@ -62,6 +63,29 @@ apply_source_patch kernel/huawei/alice \
 apply_source_patch vendor/huawei/alice \
     "${PATCHDIR}/vendor-huawei-alice/0001-hi1101-b302-firmware.patch"
 
+# The framework property is intentionally left at its Android convention
+# (`persist.radio.sim_slot_cfg=0,1`).  The pinned Android 8.1 RIL's
+# sync_sim_slot_cfg branch used that string verbatim as AT^SIMSLOT=0,1, while
+# the modem and the original EMUI RIL use the one-based AT pair 1,2.  Patch
+# all verified SIMSLOT command paths after the vendor checkout is present; the
+# script verifies the exact RIL SHA and instruction bytes before changing it.
+for ril_blob in \
+    "${ROOTDIR}/vendor/huawei/alice/proprietary/lib64/libbalong-ril.so" \
+    "${ROOTDIR}/vendor/huawei/alice/proprietary/vendor/lib64/libbalong-ril.so"; do
+    python3 "${SCRIPTDIR}/patch-ril-simslot.py" "${ril_blob}"
+done
+
+# The two Android 8.1 rild processes must own different HIDL instances.  The
+# pinned Huawei daemon hard-codes slot1 and the matching libril registers all
+# seven Huawei service names from every process; patch the exact binaries back
+# to the AOSP multi-rild contract (modem0 -> slot1, modem1 -> slot2).
+python3 "${SCRIPTDIR}/patch-ril-hidl-registration.py" \
+    "${ROOTDIR}/vendor/huawei/alice/proprietary/vendor/bin/hw/rild" \
+    "${ROOTDIR}/vendor/huawei/alice/proprietary/lib64/libril.so"
+python3 "${SCRIPTDIR}/patch-ril-hidl-registration.py" \
+    "${ROOTDIR}/vendor/huawei/alice/proprietary/vendor/bin/hw/rild" \
+    "${ROOTDIR}/vendor/huawei/alice/proprietary/vendor/lib64/libril.so"
+
 # Do not apply 0002-cam-stock-balong-ril.patch.  Binary inspection shows that
 # its replacement is the Android 6/23 562,024-byte stock RIL (Build ID
 # 8b2334c081fa158d3618093ba656d9eb).  The pinned Android 8.1 vendor tree uses
@@ -84,6 +108,7 @@ set_mk_var() {
 }
 
 echo "==> Patching ${BOARD_CONFIG} for CAM-TL00"
+
 
 # 1) OTA assert.
 #    The alice-based TWRP reports ro.product.device=hi6210sft, which is what let

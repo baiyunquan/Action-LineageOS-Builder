@@ -1,0 +1,12 @@
+# Codex defaults for the Huawei Cloud ECS build host.
+# Keep this file separate from the local ~/.codex/config.toml: local MCP
+# entries may contain machine-specific paths or credentials and must not be
+# copied to the server.
+model = "gpt-5.6-luna"
+personality = "pragmatic"
+model_reasoning_effort = "high"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+
+[projects."/home/ubuntu/Action-LineageOS-Builder"]
+trust_level = "trusted"
