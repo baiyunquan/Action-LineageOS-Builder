@@ -1,0 +1,55 @@
+name: Build boot.img only (centrue kernel comparison)
+
+on:
+  workflow_dispatch:
+    inputs:
+      enable_tcpmss:
+        description: Enable CONFIG_NETFILTER_XT_TARGET_TCPMSS
+        type: boolean
+        required: true
+        default: false
+      base_boot_url:
+        description: Direct URL of the known-good base boot.img
+        required: true
+        default: https://sourceforge.net/projects/darkjoker360-developements/files/Huawei/P8%20Lite/Oreo/LineageOS-15.1/lineage-15.1-20220611-UNOFFICIAL-alice.zip/download
+
+jobs:
+  kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kernel toolchain
+        run: sudo apt-get update && sudo apt-get install -y bc bison build-essential flex libssl-dev libncurses5-dev gcc-aarch64-linux-gnu unzip wget xz-utils
+      - name: Fetch base boot image and centrue kernel
+        run: |
+          mkdir -p work
+          wget -O work/base.zip '${{ inputs.base_boot_url }}'
+          unzip -p work/base.zip boot.img > work/base-boot.img
+          git clone --depth=1 --branch lineage-15.1 https://github.com/centrue/android_kernel_huawei_alice work/kernel-src
+      - name: Build kernel
+        working-directory: work/kernel-src
+        env:
+          ARCH: arm64
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          make alice_defconfig
+          if [ '${{ inputs.enable_tcpmss }}' = true ]; then
+            sed -i 's/^# CONFIG_NETFILTER_XT_TARGET_TCPMSS is not set/CONFIG_NETFILTER_XT_TARGET_TCPMSS=y/' .config
+          fi
+          make olddefconfig
+          make -j"$(nproc)" Image
+      - name: Replace kernel and publish boot.img
+        run: |
+          wget -qO work/magiskboot.xz https://github.com/topjohnwu/Magisk/releases/latest/download/magiskboot.xz
+          xz -d work/magiskboot.xz && chmod +x work/magiskboot
+          cp work/base-boot.img work/boot.img
+          (cd work && ./magiskboot unpack boot.img)
+          cp work/kernel-src/arch/arm64/boot/Image work/kernel
+          (cd work && ./magiskboot repack boot.img boot-fixed.img)
+          mv work/boot-fixed.img work/boot.img
+          sha256sum work/boot.img
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boot-img-centrue-tcpmss-${{ inputs.enable_tcpmss }}
+          path: work/boot.img
+          if-no-files-found: error
