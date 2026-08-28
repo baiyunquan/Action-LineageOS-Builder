@@ -1,0 +1,36 @@
+From 33eb97d5ca5ae9e8b13e89aed29cf0e487c0a2d6 Mon Sep 17 00:00:00 2001
+From: raspberrypi <liaic@outlook.com>
+Date: Fri, 28 Aug 2026 04:14:00 -0900
+Subject: [PATCH] wifi: wait for HI1101 readiness before AP mode
+
+---
+ .../connectivity/hisi/hisiwifi/hwifi_cfg80211.c     | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+index e8bdc99a..72ca2cd8 100755
+--- a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
++++ b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+@@ -2531,6 +2531,19 @@ int32 hwifi_cfg80211_change_mode(struct wiphy       *wiphy,
+         return SUCC;
+     }
+ 
++    /* Ensure HI1101 firmware is ready before hostapd requests AP mode. */
++    if ((NL80211_IFTYPE_AP == type || NL80211_IFTYPE_P2P_GO == type) &&
++        (TRUE != cfg->init_flag))
++    {
++        HWIFI_INFO("AP mode requested before HI1101 init; opening device");
++        ret = hwifi_wlan_open(ndev);
++        if (SUCC != ret)
++        {
++            HWIFI_ERROR("HI1101 readiness handshake failed: %d", ret);
++            return -EIO;
++        }
++    }
++
+     memset(&mode_param, 0, sizeof(mode_param));
+     mode_param.next_mode = cfg->hi110x_dev->mode.next_mode;
+ 
+-- 
+2.47.3
+
