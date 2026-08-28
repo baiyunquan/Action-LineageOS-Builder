@@ -1,0 +1,50 @@
+From e2331b422473a42cbc845c92cd3c6907bbc2fe50 Mon Sep 17 00:00:00 2001
+From: raspberrypi <liaic@outlook.com>
+Date: Fri, 28 Aug 2026 05:59:34 -0900
+Subject: [PATCH] wifi: export HI1101 assoc IEs before stats lookup
+
+---
+ .../hisi/hisiwifi/hwifi_cfg80211.c            | 20 ++++++++-----------
+ 1 file changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+index 72ca2cd8..492d733f 100755
+--- a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
++++ b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+@@ -1591,18 +1591,7 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+ 
+     memset(&stats_param, 0, sizeof(stats_param));
+ 
+-    stats = get_stats_struct(cfg, mac);
+-    if (NULL == stats)
+-    {
+-        return -EFAIL;
+-    }
+-
+-    /*
+-     * The HI1101 path stores the association-request IEs in its private
+-     * station table, but the original cfg80211 callback never exported
+-     * them.  nl80211 therefore gave hostapd an empty NL80211_ATTR_IE and
+-     * hostapd rejected WPA/WPA2 stations with "No WPA/RSN IE from STA".
+-     */
++    /* Export HI1101 association IEs before stats lookup: NEW_STATION may not have stats initialized yet. */
+     if (IS_AP(cfg))
+     {
+         struct conn_sta_info *sta;
+@@ -1615,6 +1604,13 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+             sinfo->assoc_req_ies_len = sta->assoc_req.ie_len;
+         }
+     }
++
++    stats = get_stats_struct(cfg, mac);
++    if (NULL == stats)
++    {
++        return -EFAIL;
++    }
++
+ 
+     if (IS_STA(cfg))
+     {
+-- 
+2.47.3
+

@@ -66,6 +66,8 @@ apply_source_patch kernel/huawei/alice \
     "${PATCHDIR}/kernel-huawei-alice/0002-hi1101-export-assoc-req-ies.patch"
 apply_source_patch kernel/huawei/alice \
     "${PATCHDIR}/kernel-huawei-alice/0003-hi1101-ap-init-readiness.patch"
+apply_source_patch kernel/huawei/alice \
+    "${PATCHDIR}/kernel-huawei-alice/0004-hi1101-assoc-req-before-stats.patch"
 apply_source_patch vendor/huawei/alice \
     "${PATCHDIR}/vendor-huawei-alice/0001-hi1101-b302-firmware.patch"
 
