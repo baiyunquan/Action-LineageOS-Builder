@@ -58,6 +58,8 @@ apply_source_patch() {
 
 apply_source_patch device/huawei/alice \
     "${PATCHDIR}/device-huawei-alice/0001-wifi-ril-compat.patch"
+apply_source_patch device/huawei/alice \
+    "${PATCHDIR}/device-huawei-alice/0002-disable-unsupported-hi1101-ht.patch"
 apply_source_patch kernel/huawei/alice \
     "${PATCHDIR}/kernel-huawei-alice/0001-enable-tcpmss-for-hisi-tethering.patch"
 apply_source_patch kernel/huawei/alice \

@@ -1,0 +1,13 @@
+diff --git a/wifi/hostapd_hisi.conf b/wifi/hostapd_hisi.conf
+index 233bc00..0e26db5 100755
+--- a/wifi/hostapd_hisi.conf
++++ b/wifi/hostapd_hisi.conf
+@@ -6,5 +6,7 @@ channel=6
+ wpa=2
+ rsn_pairwise=CCMP
+ wpa_psk=c3d3939731a21a645f4ef2cbf29a9d1f1f254a8d9cef81fbc1b92b8ce1d9cb86
+-ieee80211n=1
++# HI1101 advertises HT20/40 but has no Short-GI capability.  The bundled
++# Android 8.1 hostapd otherwise forces SHORT-GI-20 and refuses AP startup.
++ieee80211n=0
+ country_code=CN
