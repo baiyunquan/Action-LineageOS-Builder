@@ -1,0 +1,42 @@
+From f9741ac4a974cb5188047635663903287df8748c Mon Sep 17 00:00:00 2001
+From: raspberrypi <liaic@outlook.com>
+Date: Fri, 28 Aug 2026 03:06:27 -0900
+Subject: [PATCH] AP WPA PSK Fix
+
+---
+ .../hisi/hisiwifi/hwifi_cfg80211.c            | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+index 81497dc6..e8bdc99a 100755
+--- a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
++++ b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+@@ -1596,6 +1596,25 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+     {
+         return -EFAIL;
+     }
++
++    /*
++     * The HI1101 path stores the association-request IEs in its private
++     * station table, but the original cfg80211 callback never exported
++     * them.  nl80211 therefore gave hostapd an empty NL80211_ATTR_IE and
++     * hostapd rejected WPA/WPA2 stations with "No WPA/RSN IE from STA".
++     */
++    if (IS_AP(cfg))
++    {
++        struct conn_sta_info *sta;
++
++        sta = find_by_mac(&cfg->ap_info.sta_mgmt, mac);
++        if ((NULL != sta) && (0 != sta->assoc_req.ie_len))
++        {
++            sinfo->filled |= STATION_INFO_ASSOC_REQ_IES;
++            sinfo->assoc_req_ies = sta->assoc_req.ie;
++            sinfo->assoc_req_ies_len = sta->assoc_req.ie_len;
++        }
++    }
+ 
+     if (IS_STA(cfg))
+     {
+-- 
+2.47.3
+
