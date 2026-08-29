@@ -1,0 +1,36 @@
+From 538a7ff66e90a8cc36e5bd3dacf8b182ae2c8f36 Mon Sep 17 00:00:00 2001
+From: raspberrypi <liaic@outlook.com>
+Date: Fri, 28 Aug 2026 16:01:11 -0900
+Subject: [PATCH] wifi: export HI1101 assoc IEs with new station event
+
+---
+ .../connectivity/hisi/hisiwifi/cfg_event_rx.c    | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/drivers/huawei_platform/connectivity/hisi/hisiwifi/cfg_event_rx.c b/drivers/huawei_platform/connectivity/hisi/hisiwifi/cfg_event_rx.c
+index 8bef9ee1..a7de58cb 100755
+--- a/drivers/huawei_platform/connectivity/hisi/hisiwifi/cfg_event_rx.c
++++ b/drivers/huawei_platform/connectivity/hisi/hisiwifi/cfg_event_rx.c
+@@ -404,6 +404,22 @@ STATIC void  hwifi_sta_join(struct cfg_struct *cfg, struct hwifi_sta_join_stru *
+     /* send event to application */
+     memset(&sinfo, 0, sizeof(sinfo));
+     /* TODO: sinfo.generation */
++
++    /*
++     * hostapd receives the association request IEs from the station_info
++     * attached to NL80211_CMD_NEW_STATION.  HI1101 already saved these IEs
++     * in the private station table in hwifi_report_mgmt_frame(), but the
++     * original code reported an empty station_info.  Without the RSN IE,
++     * hostapd cannot start the WPA handshake and drops the station after its
++     * authentication timeout.
++     */
++    if (0 != sta->assoc_req.ie_len)
++    {
++        sinfo.filled |= STATION_INFO_ASSOC_REQ_IES;
++        sinfo.assoc_req_ies = sta->assoc_req.ie;
++        sinfo.assoc_req_ies_len = sta->assoc_req.ie_len;
++        HWIFI_INFO("STA_JOIN: export assoc_req IEs, len=%d", sta->assoc_req.ie_len);
++    }
+ 
+     HWIFI_INFO("STA_JOIN : report added station to kernel,aid=%d,mac="MACFMT, event->aid, MAC2STR(event->mac));
+     cfg80211_new_sta(cfg->ndev, sta->mac, &sinfo, GFP_KERNEL);
