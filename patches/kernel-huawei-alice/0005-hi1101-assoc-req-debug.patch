@@ -1,0 +1,119 @@
+From 869da985e859fcf86da57970fe0eaf78705f46ba Mon Sep 17 00:00:00 2001
+From: raspberrypi <liaic@outlook.com>
+Date: Fri, 28 Aug 2026 15:14:43 -0900
+Subject: [PATCH] wifi: trace HI1101 station IE export path
+
+---
+ .../hisi/hisiwifi/hwifi_cfg80211.c            | 36 ++++++++++++++++++-
+ 1 file changed, 35 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+index 492d733f..c2b73e29 100755
+--- a/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
++++ b/drivers/huawei_platform/connectivity/hisi/hisiwifi/hwifi_cfg80211.c
+@@ -525,7 +525,8 @@ STATIC int32 hwifi_cfg80211_scan(struct wiphy                *wiphy,
+ 
+     HWIFI_DEBUG("n_ssids = %d, ssids=0x%p", request->n_ssids, request->ssids);
+ 
+-    cfg = wiphy_priv(wiphy);
++    cfg = wiphy_priv(wiphy);
++
+     hi110x_dev = cfg->hi110x_dev;
+ 
+     /* DTS2014010208179 HI1101 bug fix dengwenhua/d00223710 begin */
+@@ -1590,6 +1591,8 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+     cfg = wiphy_priv(wiphy);
+ 
+     memset(&stats_param, 0, sizeof(stats_param));
++    HWIFI_INFO("get_station enter");
++    HWIFI_INFO("get_station IS_AP=%d", IS_AP(cfg));
+ 
+     /* Export HI1101 association IEs before stats lookup: NEW_STATION may not have stats initialized yet. */
+     if (IS_AP(cfg))
+@@ -1597,19 +1600,40 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+         struct conn_sta_info *sta;
+ 
+         sta = find_by_mac(&cfg->ap_info.sta_mgmt, mac);
++        if (NULL == sta)
++        {
++            HWIFI_WARNING("get_station find_by_mac failed");
++        }
++        else
++        {
++            HWIFI_INFO("get_station find_by_mac success assoc_req.ie_len=%d",
++                       sta->assoc_req.ie_len);
++        }
+         if ((NULL != sta) && (0 != sta->assoc_req.ie_len))
+         {
+             sinfo->filled |= STATION_INFO_ASSOC_REQ_IES;
+             sinfo->assoc_req_ies = sta->assoc_req.ie;
+             sinfo->assoc_req_ies_len = sta->assoc_req.ie_len;
++            HWIFI_INFO("get_station sinfo->filled=0x%llx assoc_req_ies_len=%d",
++                       (unsigned long long)sinfo->filled,
++                       sinfo->assoc_req_ies_len);
++        }
++        else
++        {
++            HWIFI_INFO("get_station sinfo->filled=0x%llx assoc_req_ies_len=0",
++                       (unsigned long long)sinfo->filled);
+         }
+     }
+ 
+     stats = get_stats_struct(cfg, mac);
+     if (NULL == stats)
+     {
++        HWIFI_WARNING("get_stats_struct failed");
++        HWIFI_INFO("get_station return=%d sinfo->filled=0x%llx", -EFAIL,
++                   (unsigned long long)sinfo->filled);
+         return -EFAIL;
+     }
++    HWIFI_INFO("get_stats_struct success aid=%d", stats->aid);
+ 
+ 
+     if (IS_STA(cfg))
+@@ -1618,6 +1642,8 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+         HWIFI_DEBUG("sta mode get station info direct!");
+         stats->updated = TRUE;
+         fill_station_info(stats, sinfo);
++        HWIFI_INFO("get_station return=%d sinfo->filled=0x%llx", SUCC,
++                   (unsigned long long)sinfo->filled);
+         return SUCC;
+     }
+ 
+@@ -1630,6 +1656,8 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+     if (SUCC != ret)
+     {
+         HWIFI_WARNING("Failed to query stats!");
++        HWIFI_INFO("get_station return=%d sinfo->filled=0x%llx", -EFAIL,
++                   (unsigned long long)sinfo->filled);
+         return -EFAIL;
+     }
+ 
+@@ -1640,11 +1668,15 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+     if (left == 0)
+     {
+         HWIFI_WARNING("Get station info timeout");
++        HWIFI_INFO("get_station return=%d sinfo->filled=0x%llx", -ETIMEDOUT,
++                   (unsigned long long)sinfo->filled);
+         return -ETIMEDOUT;
+     }
+     else if (left < 0)
+     {
+         HWIFI_WARNING("Get station info error,ret=%ld", left);
++        HWIFI_INFO("get_station return=%d sinfo->filled=0x%llx", (int32)left,
++                   (unsigned long long)sinfo->filled);
+         return left;
+     }
+ 
+@@ -1652,6 +1684,8 @@ STATIC int32 hwifi_cfg80211_get_station(struct wiphy         *wiphy,
+ 
+     fill_station_info(stats, sinfo);
+ 
++    HWIFI_INFO("get_station return=%d sinfo->filled=0x%llx", SUCC,
++               (unsigned long long)sinfo->filled);
+     return SUCC;
+ }
+ 
+-- 
+2.47.3
+
